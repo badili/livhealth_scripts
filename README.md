@@ -1,2 +1,2 @@
-# livhealth_scripts
-The processing scripts for LivHealth
+# LivHealth Scripts
+The processing scripts for LivHealth, http://livhealth.or.ke
