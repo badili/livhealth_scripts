@@ -16,26 +16,30 @@ from django.conf import settings
 from django.forms.models import model_to_dict
 from raven import Client
 
-from .terminal_output import Terminal
-from .models import SMSQueue, MessageTemplates, Recipients, Campaign, SubCounty, Ward, Village
-from .serializers import RecepientSerializer
-from .odk_forms import OdkForms
-from .odk_choices_parser import ImportODKChoices
+try:
+    # try importing stuff from LivHealth
+    from .terminal_output import Terminal
+    from .models import SMSQueue, MessageTemplates, Recipients, Campaign, SubCounty, Ward, Village
+    from .serializers import RecepientSerializer
+    from .odk_forms import OdkForms
+    from .odk_choices_parser import ImportODKChoices
+except:
+    from vendor.terminal_output import Terminal
+    from .models import SMSQueue, MessageTemplates, Personnel, Campaign 
 
 terminal = Terminal()
 sentry = Client(settings.SENTRY_DSN)
 
-settings.TIME_ZONE
 current_tz = pytz.timezone(settings.TIMEZONE)
 timezone.activate(current_tz)
 
 
 class Notification():
     def __init__(self):
-        # silence is golden
         self.time_formats = ['now', 'today', 'tomorrow', 'yesterday']
-
         self.at_ok_sending_status_codes = [100, 101, 102]
+        if settings.AT_SENDER_ID is None:
+            settings.AT_SENDER_ID = 'LivHealth'
 
     def process_test_data(self, input_file):
         """Given an input file, imports the data to the DB
@@ -322,7 +326,7 @@ class Notification():
             cur_time = cur_time.strftime('%Y-%m-%d %H:%M:%S')
             # lets send the messages synchronously... should be changed to async
             # How does AT identify a message when a callback is given
-            this_resp = self.at_sms.send(mssg.message, [mssg.recipient_no], enqueue=False)
+            this_resp = self.at_sms.send(mssg.message, [mssg.recipient_no], settings.AT_SENDER_ID, enqueue=False)
             # print(this_resp)
             if this_resp['SMSMessageData']['Recipients'][0]['statusCode'] in self.at_ok_sending_status_codes:
                 # if the message is processed well, add the results to the db
@@ -748,3 +752,111 @@ class Notification():
         notifications = SMSQueue.objects.select_related('recipient').select_related('template').order_by('-schedule_time').all()
 
         return {'notifications': notifications}
+
+
+class PazuriNotification():
+    def __init__(self):
+        self.time_formats = ['now', 'today', 'tomorrow', 'yesterday']
+        self.at_ok_sending_status_codes = [100, 101, 102]
+        if settings.AT_SENDER_ID is None:
+            settings.AT_SENDER_ID = 'Pazuri'
+
+    def get_notification_settings(self):
+        """Get the settings defined for the different notifications
+        """
+        try:
+            data_set = {
+                'campaigns': Campaign.objects.all(),
+                'templates': MessageTemplates.objects.order_by('template_name').all(),
+                'recipients': Personnel.objects.order_by('first_name').all(),
+                'recipient_types': ['Farmhand', 'Manager', 'Sales Representative'],
+            }
+
+            return data_set
+        except Exception as e:
+            terminal.tprint(str(e), 'fail')
+            sentry.captureException()
+            raise Exception(str(e))
+
+    def save_recipient(self, request):
+        try:
+            # get the campaign details and add them to the database
+            salutation = request.POST.get('salutation')
+            first_name = request.POST.get('first-name').strip()
+            other_names = request.POST.get('other-names').strip()
+            designation = request.POST.get('designation')
+            email = request.POST.get('email').strip()
+            cell_no = request.POST.get('cell_no').strip()
+            alternative_cell_no = request.POST.get('alternative_cell_no').strip() if request.POST.get('alternative_cell_no') != '' else None
+            sub_county_id = request.POST.get('sub-county')
+            ward_id = request.POST.get('ward').strip()
+            village_id = request.POST.get('village').strip()
+
+            # get the campaign names for this template
+            if sub_county_id == '-1' or sub_county_id == '':
+                sub_county = None
+                ward = None
+                village = None
+            else:
+                sub_county = SubCounty.objects.filter(id=sub_county_id).get()
+                if ward_id != '' and ward_id.isnumeric() is False:
+                    # we have a new ward...
+                    odk_choices_parser = ImportODKChoices()
+                    new_ward = {
+                        'label': ward_id,
+                        'name': ward_id.replace("'.- ", '').lower(),
+                        'ward_subcounty': sub_county.nick_name
+                    }
+                    ward = odk_choices_parser.process_ward(new_ward)
+                else:
+                    ward = Ward.objects.filter(id=ward_id).get() if ward_id != '' else None
+                
+                if village_id != '' and village_id.isnumeric() is False:
+                    # we have a new village...
+                    odk_choices_parser = ImportODKChoices()
+                    new_village = {
+                        'label': village_id,
+                        'name': village_id.replace("'.- ", '').lower(),
+                        'village_ward': ward.nick_name
+                    }
+                    village = odk_choices_parser.process_village(new_village)
+                else:
+                    village = Village.objects.filter(id=village_id).get() if village_id != '' else None
+
+            transaction.set_autocommit(False)
+            if request.POST.get('object_id'):
+                recipient = Recipients.objects.filter(id=request.POST.get('object_id')).get()
+                recipient.salutation = salutation
+                recipient.first_name = first_name
+                recipient.other_names = other_names
+                recipient.designation = designation
+                recipient.cell_no = cell_no
+                recipient.alternative_cell_no = alternative_cell_no
+                recipient.recipient_email = email
+                recipient.village = village
+                recipient.ward = ward
+                recipient.sub_county = sub_county
+            else:
+                # fabricate a nick_name for the recipient
+                nick_name = '%s_%s' % (first_name.replace("'.- ", '').lower(), other_names.replace("'.- ", '').lower())
+                recipient = Recipients(
+                    salutation=salutation,
+                    first_name=first_name,
+                    other_names=other_names,
+                    designation=designation,
+                    cell_no=cell_no,
+                    alternative_cell_no=alternative_cell_no,
+                    recipient_email=email,
+                    nick_name=nick_name,
+                    village=village,
+                    ward=ward,
+                    sub_county=sub_county
+                )
+            recipient.full_clean()
+            recipient.save()
+            transaction.commit()
+        except Exception as e:
+            transaction.rollback()
+            terminal.tprint(str(e), 'fail')
+            sentry.captureException()
+            raise Exception(str(e))

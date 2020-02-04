@@ -533,7 +533,6 @@ class OdkForms():
                 except Exception as e:
                     terminal.tprint(str(e), 'fail')
                     raise
-                
 
     def add_to_all_nodes(self, t_node):
         # add a node to the list of all nodes for creating the tree
@@ -1202,7 +1201,7 @@ class OdkForms():
         inc_change_class = 'fa-level-up' if float(inc_change) > 0.0 else 'fa-level-down'
         # terminal.tprint(inc_change, 'ok')
 
-        terminal.tprint('Species', 'fail')
+        # terminal.tprint('Species', 'fail')
         species_this_week = self.proccess_submissions_count(affected_species_this_week)
         species_last_week = self.proccess_submissions_count(affected_species_last_week)
         species_change = "{0:0.1f}".format((((species_this_week - species_last_week) / species_last_week)) * 100)
@@ -2268,7 +2267,7 @@ def auto_process_submissions():
             html_content = render_to_string('email-missing-info.html', {'message_details': email_message })
             email_subject = '[%s] Missing details' % settings.SITE_NAME
 
-            odk_forms.send_email(email_subject, recipients, text_content, html_content)
+            # odk_forms.send_email(email_subject, recipients, text_content, html_content)
     except Exception as e:
         terminal.tprint(str(e), 'fail')
         # terminal.tprint(json.dumps(subm), 'fail')
