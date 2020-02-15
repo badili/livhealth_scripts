@@ -2298,7 +2298,8 @@ def process_syndromic_submissions(form_ids):
                 continue
             else:
                 # some old forms structure were quite wrong and should be omitted
-                if subm['_xform_id_string'] in ["marsabit_dsf_v1"]:
+                # for some strange reason, some forms are missing the village record.... just omit them
+                if subm['_xform_id_string'] in ["marsabit_dsf_v1"] or 's1q6_village' not in subm:
                     if 'skipped_subm' not in missing_info:
                         missing_info['skipped_subm'] = [0]
                     
@@ -2316,7 +2317,7 @@ def process_syndromic_submissions(form_ids):
                     else:
                         if 'missing_mapped_village' not in missing_info:
                             missing_info['missing_mapped_village'] = []
-                        missing_info['missing_mapped_village'].append(subm['s1q5_village'])
+                        missing_info['missing_mapped_village'].append(subm['s1q6_village'])
                         raise ValueError("Village '%s' not found in the mapping database, use the fall back plan..." % subm['s1q6_village'])
 
                     latitude = mapped_village.latitude
@@ -2424,6 +2425,11 @@ def process_notifiable_diseases(form_ids):
                 # terminal.tprint(json.dumps(subm), 'ok')
                 # print ""
                 # continue
+
+                # for some strange reason the location information is missing... so just ski this submission
+                if 's1q5_village' not in subm:
+                    continue
+
                 datetime_subm = timezone.make_aware(datetime.strptime(subm['_submission_time'], "%Y-%m-%dT%H:%M:%S"))            # datetime_uploaded
                 datetime_rep = timezone.make_aware(datetime.strptime(subm['s0q2_start_time'][:23], "%Y-%m-%dT%H:%M:%S.%f"))      # datetime_reported
                 try:
