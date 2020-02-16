@@ -654,7 +654,7 @@ class Notification():
         sending_time = cur_time.replace(hour=int(parts[0]), minute=int(parts[1]), second=int(parts[2]))
 
         split_seconds = (cur_time - sending_time).total_seconds()
-        print('Splits\n````````````\n%.1f -- %.1f\n--\n' % (split_seconds, settings.SENDING_SPLIT))
+        print('\n%s: Splits\n````````````\n%.1f -- %.1f\n--\n' % (cur_time.strftime('%A %d-%m %H:%M:%S'), split_seconds, settings.SENDING_SPLIT))
 
         # loop through the campaigns and determine the one that needs processing
         campaigns = Campaign.objects.all()
@@ -669,7 +669,7 @@ class Notification():
                     templates = MessageTemplates.objects.filter(campaign_id=campaign.id).all()
                     for template in templates:
                         # print(template.template_name)
-                        if template.template_name == 'Management Weekly Report':
+                        if template.template_name == 'Management Weekly Report' or template.template_name == 'LivHealth Admin Weekly Feedback':
                             stats = self.management_weekly_report(odk_form, odk_form.sub_counties)
 
                         # get the users in this campaign
@@ -690,18 +690,19 @@ class Notification():
                                     sub_county_name = sub_counties_stats[recipient.sub_county.nick_name]['sub_county_name']
 
                                 message = template.template % tuple([recipient.first_name] + [sub_county_name] + [sc_stats[0], sc_stats[2]])
-                            elif template.template_name == 'Management Weekly Report':
+                            elif template.template_name == 'Management Weekly Report' or template.template_name == 'LivHealth Admin Weekly Feedback':
                                 # name, # syndromic reports, # abbatoirs, # ND1 reports, # agrovet reports from the last week
                                 message = template.template % tuple([recipient.first_name] + stats)
 
                             if recipient.cell_no or recipient.alternative_cell_no:
-                                print(message)
+                                # print('\n%s: %s' % (template.template_name, message))
                                 odk_form.schedule_notification(template, recipient, message)
                                 i = i + 1
 
                             # one recipent per template if debug is True
                             # if settings.DEBUG:
                             #     break
+                    # print(sub_counties_stats)
 
         print('\nSent %d messages\n' % i)
 
@@ -719,21 +720,21 @@ class Notification():
             FROM nd_details as a INNER JOIN nd_reports as b on a.nd_report_id=b.id
             WHERE nd_date_reported > '%s' AND nd_date_reported < '%s' AND sub_county IN %s
         """ % (str(start_date), str(end_date), tuple(sub_counties))
-        print(nd_reporting_q)
+        # print(nd_reporting_q)
 
         sh_reporting_q = """
             SELECT count(*)
             FROM sh_reports as a
             WHERE report_date > '%s' AND report_date < '%s'
         """ % (str(start_date), str(end_date))
-        print(sh_reporting_q)
+        # print(sh_reporting_q)
 
         ag_reporting_q = """
             SELECT count(*)
             FROM ag_detail as a INNER JOIN ag_reports as b on a.ag_report_id=b.id
             WHERE report_date > '%s' AND report_date < '%s'
         """ % (str(start_date), str(end_date))
-        print(ag_reporting_q)
+        # print(ag_reporting_q)
 
         with connection.cursor() as cursor:
             cursor.execute(nd_reporting_q)
