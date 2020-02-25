@@ -10,10 +10,11 @@ import pytz
 import random
 import json
 
-from django.db import transaction, connection
-from django.utils import timezone
 from django.conf import settings
+from django.contrib.auth.tokens import PasswordResetTokenGenerator
+from django.db import transaction, connection
 from django.forms.models import model_to_dict
+from django.utils import timezone
 from raven import Client
 
 try:
@@ -24,14 +25,24 @@ try:
     from .odk_forms import OdkForms
     from .odk_choices_parser import ImportODKChoices
 except:
+    # try importing stuff from PazuriPoultry
     from vendor.terminal_output import Terminal
-    from .models import SMSQueue, MessageTemplates, Personnel, Campaign 
+    from .models import SMSQueue, MessageTemplates, Personnel, Campaign, Farm
 
 terminal = Terminal()
 sentry = Client(settings.SENTRY_DSN)
 
 current_tz = pytz.timezone(settings.TIMEZONE)
 timezone.activate(current_tz)
+
+
+class TokenGenerator(PasswordResetTokenGenerator):
+    def _make_hash_value(self, user, timestamp):
+        return (
+            six.text_type(user.pk) + six.text_type(timestamp) +
+            six.text_type(user.is_active)
+        )
+account_activation_token = TokenGenerator()
 
 
 class Notification():
@@ -754,6 +765,17 @@ class Notification():
 
         return {'notifications': notifications}
 
+    def send_email(self, email_settings):
+        try:
+            template = self.env.get_template(email_settings.template)
+            email_html = template.render(email_settings)
+
+            Emails.send_email(email_settings.recipient_email, email_settings.sender_email, None, email_settings.subject, email_html)
+        except Exception as e:
+            terminal.tprint(str(e), 'fail')
+            sentry.captureException()
+            raise Exception(str(e))
+
 
 class PazuriNotification():
     def __init__(self):
@@ -762,14 +784,14 @@ class PazuriNotification():
         if settings.AT_SENDER_ID is None:
             settings.AT_SENDER_ID = 'Pazuri'
 
-    def get_notification_settings(self):
+    def get_notification_settings(self, farm_id):
         """Get the settings defined for the different notifications
         """
         try:
             data_set = {
-                'campaigns': Campaign.objects.all(),
-                'templates': MessageTemplates.objects.order_by('template_name').all(),
-                'recipients': Personnel.objects.order_by('first_name').all(),
+                'campaigns': Campaign.objects.filter(farm_id=farm_id).all(),
+                'templates': MessageTemplates.objects.select_related().filter(campaign__farm_id=farm_id).order_by('template_name').all(),
+                'recipients': Personnel.objects.filter(farm_id=farm_id).order_by('first_name').all(),
                 'recipient_types': ['Farmhand', 'Manager', 'Sales Representative'],
             }
 
@@ -855,6 +877,38 @@ class PazuriNotification():
                 )
             recipient.full_clean()
             recipient.save()
+            transaction.commit()
+        except Exception as e:
+            transaction.rollback()
+            terminal.tprint(str(e), 'fail')
+            sentry.captureException()
+            raise Exception(str(e))
+
+    def save_campaign(self, request, farm_id):
+        try:
+            # get the campaign details and add them to the database
+            campaign_name = request.POST.get('campaign-name')
+            recipients = request.POST.getlist('recipients[]')
+            scheduled = request.POST.get('schedule-day')
+            farm = Farm.objects.filter(id=farm_id).get()
+
+            transaction.set_autocommit(False)
+            if request.POST.get('object_id'):
+                # we are editing a campaign
+                campaign = Campaign.objects.filter(id=request.POST.get('object_id')).get()
+                campaign.campaign_name=campaign_name
+                campaign.recipients=','.join(recipients)
+                campaign.schedule_time=scheduled
+                campaign.farm=farm
+            else:
+                campaign = Campaign(
+                    campaign_name=campaign_name,
+                    recipients=','.join(recipients),
+                    schedule_time=scheduled,
+                    farm=farm
+                )
+            campaign.full_clean()
+            campaign.save()
             transaction.commit()
         except Exception as e:
             transaction.rollback()
