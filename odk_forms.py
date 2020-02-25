@@ -2267,7 +2267,7 @@ def auto_process_submissions():
             html_content = render_to_string('email-missing-info.html', {'message_details': email_message })
             email_subject = '[%s] Missing details' % settings.SITE_NAME
 
-            # odk_forms.send_email(email_subject, recipients, text_content, html_content)
+            odk_forms.send_email(email_subject, recipients, text_content, html_content)
     except Exception as e:
         terminal.tprint(str(e), 'fail')
         # terminal.tprint(json.dumps(subm), 'fail')
