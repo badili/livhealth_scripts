@@ -11,11 +11,13 @@ import random
 import json
 
 from django.conf import settings
-from django.contrib.auth.tokens import PasswordResetTokenGenerator
 from django.db import transaction, connection
 from django.forms.models import model_to_dict
 from django.utils import timezone
 from raven import Client
+
+from jinja2 import Template, FileSystemLoader
+from jinja2.environment import Environment
 
 try:
     # try importing stuff from LivHealth
@@ -28,6 +30,7 @@ except:
     # try importing stuff from PazuriPoultry
     from vendor.terminal_output import Terminal
     from .models import SMSQueue, MessageTemplates, Personnel, Campaign, Farm
+    from .common_tasks import Emails
 
 terminal = Terminal()
 sentry = Client(settings.SENTRY_DSN)
@@ -36,21 +39,17 @@ current_tz = pytz.timezone(settings.TIMEZONE)
 timezone.activate(current_tz)
 
 
-class TokenGenerator(PasswordResetTokenGenerator):
-    def _make_hash_value(self, user, timestamp):
-        return (
-            six.text_type(user.pk) + six.text_type(timestamp) +
-            six.text_type(user.is_active)
-        )
-account_activation_token = TokenGenerator()
-
-
 class Notification():
     def __init__(self):
         self.time_formats = ['now', 'today', 'tomorrow', 'yesterday']
         self.at_ok_sending_status_codes = [100, 101, 102]
         if settings.AT_SENDER_ID is None:
             settings.AT_SENDER_ID = 'LivHealth'
+
+        # email environment
+        self.email_obj = Emails()
+        self.env = Environment()
+        self.env.loader = FileSystemLoader(settings.TEMPLATES[0]['DIRS'][0])
 
     def process_test_data(self, input_file):
         """Given an input file, imports the data to the DB
@@ -767,10 +766,11 @@ class Notification():
 
     def send_email(self, email_settings):
         try:
-            template = self.env.get_template(email_settings.template)
+            # print(email_settings)
+            template = self.env.get_template(email_settings['template'])
             email_html = template.render(email_settings)
 
-            Emails.send_email(email_settings.recipient_email, email_settings.sender_email, None, email_settings.subject, email_html)
+            Emails.send_email(email_settings['recipient_email'], email_settings['sender_email'], None, email_settings['subject'], email_html)
         except Exception as e:
             terminal.tprint(str(e), 'fail')
             sentry.captureException()
