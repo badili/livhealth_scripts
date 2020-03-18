@@ -1011,6 +1011,8 @@ class OdkForms():
     def process_curl_request(self, url):
         """
         Create and execute a curl request
+
+        @todo deprecated since it the function has been moved to onadata class
         """
         headers = {'Authorization': "Token %s" % self.api_token}
         # terminal.tprint("Processing API request %s" % url, 'okblue')

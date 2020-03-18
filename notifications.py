@@ -11,6 +11,7 @@ import random
 import json
 
 from django.conf import settings
+from django.contrib.auth.hashers import make_password
 from django.db import transaction, connection
 from django.forms.models import model_to_dict
 from django.utils import timezone
@@ -29,7 +30,7 @@ try:
 except:
     # try importing stuff from PazuriPoultry
     from vendor.terminal_output import Terminal
-    from .models import SMSQueue, MessageTemplates, Personnel, Campaign, Farm
+    from .models import SMSQueue, MessageTemplates, Personnel, Campaign, Farm, SubscriptionPayment, Batch, Production, OtherEvents, Farm, PERSONNEL_DESIGNATION_CHOICES
     from .common_tasks import Emails
 
 terminal = Terminal()
@@ -336,8 +337,12 @@ class Notification():
             cur_time = cur_time.strftime('%Y-%m-%d %H:%M:%S')
             # lets send the messages synchronously... should be changed to async
             # How does AT identify a message when a callback is given
-            this_resp = self.at_sms.send(mssg.message, [mssg.recipient_no], settings.AT_SENDER_ID, enqueue=False)
+            # this_resp = self.at_sms.send(mssg.message, [mssg.recipient_no], settings.AT_SENDER_ID, enqueue=False)
+            this_resp = self.at_sms.send(mssg.message, [mssg.recipient_no], enqueue=False)
             # print(this_resp)
+            if len(this_resp['SMSMessageData']['Recipients']) == 0:
+                print(mssg)
+                raise Exception(this_resp['SMSMessageData']['Message'])
             if this_resp['SMSMessageData']['Recipients'][0]['statusCode'] in self.at_ok_sending_status_codes:
                 # if the message is processed well, add the results to the db
                 mssg.in_queue = 0
@@ -792,7 +797,7 @@ class PazuriNotification():
                 'campaigns': Campaign.objects.filter(farm_id=farm_id).all(),
                 'templates': MessageTemplates.objects.select_related().filter(campaign__farm_id=farm_id).order_by('template_name').all(),
                 'recipients': Personnel.objects.filter(farm_id=farm_id).order_by('first_name').all(),
-                'recipient_types': ['Farmhand', 'Manager', 'Sales Representative'],
+                'recipient_types': [k[0] for k in PERSONNEL_DESIGNATION_CHOICES],
             }
 
             return data_set
@@ -915,3 +920,178 @@ class PazuriNotification():
             terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise Exception(str(e))
+
+    def send_message_immediately(self):
+        # Schedule the message to be sent
+        print('')
+
+    def schedule_notification(self, template, recipient, message):
+        # This function should be in the notifications module, but due to cyclic dependancies, we include it here
+        try:
+            cur_time = timezone.localtime(timezone.now())
+            # print(message)
+            # print('+254726567797' if settings.DEBUG else recipient.cell_no if recipient.cell_no else recipient.alternative_cell_no)
+            queue_item = SMSQueue(
+                template=template,
+                message=message,
+                recipient=recipient,
+                recipient_no=recipient.tel if recipient.tel else recipient.alternative_tel,
+                # recipient_no='+254726567797' if settings.DEBUG else recipient.tel if recipient.tel else recipient.alternative_tel,
+                msg_status='SCHEDULED',
+                schedule_time=cur_time.strftime('%Y-%m-%d %H:%M:%S')
+            )
+            queue_item.full_clean()
+            queue_item.save()
+
+            return queue_item
+        except Exception as e:
+            terminal.tprint(str(e), 'fail')
+            sentry.captureException()
+            raise Exception(str(e))
+
+    def send_message_on_money_receipt(self, trans_code, amount, msisdn, first_name, middle_name, last_name):
+        # for every amount received, acknowledge with a message
+        try:
+            transaction.set_autocommit(False)
+            subscr = SubscriptionPayment.objects.select_related('tier').filter(activation_code=trans_code).first()
+            if subscr is not None:
+                recipient = Personnel.objects.filter(tel=subscr.subscr_init_number).first()
+                # we were paying for a subscription
+                if amount == subscr.subscr_amount:
+                    template = MessageTemplates.objects.filter(template_name='Subscription Successful Payment').first()
+                    message = template.template % (recipient.first_name, subscr.tier.tier_name)
+                elif amount < subscr.subscr_amount:
+                    template = MessageTemplates.objects.filter(template_name='Subscription Successful Part Payment').first()
+                    # once the verification step is enabled, we shall be able to correctly determine the part payments, for now, just assume its a 2 part payment
+                    balance = 'Your remaining balance is %s' % (subscr.subscr_amount - (amount + 0) )
+                    message = template.template % (recipient.first_name, amount, subscr.tier.tier_name, balance)
+                elif amount > subscr.subscr_amount:
+                    # this is not meant to happen when the verification step is enabled, for now just accept the money
+                    template = MessageTemplates.objects.filter(template_name='Subscription Successful Payment').first()
+                    message = template.template % (recipient.first_name, subscr.tier.tier_name)
+                    message = message + ' You have an overpayment of %s' % (subscr.subscr_amount - amount)
+            else:
+                # we have a general payment, check if the payer is known in the system, else create a temp account
+                recipient = Personnel.objects.filter(tel__contains=msisdn).first()
+                if recipient is None:
+                    username = '%s_%s_%s' % (first_name, middle_name, last_name)
+                    username = username.replace("'", '').replace("-", '').replace(".", '').replace(" ", '')
+                    recipient = Personnel(
+                        first_name=first_name,
+                        last_name=last_name,
+                        username=username,
+                        nickname=username,
+                        password=make_password(username),
+                        tel='+%s' % msisdn
+                    )
+                    recipient.full_clean()
+                    recipient.save()
+                template = MessageTemplates.objects.filter(template_name='General Successful Payment').first()
+                message = template.template % (recipient.first_name, amount, trans_code)
+                
+            notify = Notification()
+            queued_item = self.schedule_notification(template, recipient, message)
+            notify.configure_at()
+            notify.send_via_at(queued_item)
+
+            transaction.commit()
+        except Exception as e:
+            transaction.rollback()
+            terminal.tprint(str(e), 'fail')
+            sentry.captureException()
+            raise Exception('There was an error while confirming the registration.')
+
+    def periodic_processing(self, provider):
+        queue = Notification()
+
+        if provider == 'at':
+            queue.configure_at()
+        elif provider == 'nexmo':
+            queue.configure_nexmo()
+        else:
+            # configure all the providers so that they can be selected randomly
+            queue.configure_at()
+            queue.configure_nexmo()
+
+        # if need be, crunch the data for feedback to the users
+        # Notifications are scheduled on the specified day at settings.SENDING_SPLIT
+
+        cur_time = timezone.localtime(timezone.now())
+        i = 0
+        farms = Farm.objects.all()
+        for farm in farms:
+            # loop through the campaigns and determine the one that needs processing
+            campaigns = Campaign.objects.filter(farm_id=farm.id).all()
+            records = None
+            for campaign in campaigns:
+                if cur_time.strftime('%A') == campaign.schedule_time or campaign.schedule_time == 'Daily':
+                    templates = MessageTemplates.objects.filter(campaign_id=campaign.id).all()
+                    # get the users in this campaign
+                    user_groups = campaign.recipients.split(',')
+                    recipients = Personnel.objects.filter(designation__in=user_groups, is_active=1)
+
+                    for template in templates:
+                        # check if this template should be send now...
+                        parts = template.sending_time.strftime('%H:%M:%S').split(':')
+                        sending_time = cur_time.replace(hour=int(parts[0]), minute=int(parts[1]), second=int(parts[2]))
+                        split_seconds = (cur_time - sending_time).total_seconds()
+                        print('\nCurrent Time == %s :: Sending Time == %s\nSplits\n````````````\n%.1f -- %.1f\n--\n' % (cur_time.strftime('%A %d-%m %H:%M:%S'), template.sending_time.strftime('%H:%M:%S'), split_seconds, settings.SENDING_SPLIT))
+
+                        if split_seconds > -1 and split_seconds < settings.SENDING_SPLIT:
+                            # get the templates assigned to this campaign that needs to be processed
+                            if records is None:
+                                records = self.check_submitted_daily_records(farm.id)
+                            
+                            if template.template_name == 'Daily Records Reminder':
+                                # format the data for daily records reminder. loop through all records and check the ones with None
+                                missing_records = {}
+                                for batch_name, record in records.items():
+                                    # cur_record = list(record.keys())[0]
+                                    for cur_record in list(record.keys()):
+                                        if cur_record in ('Feed records', 'Egg production'):
+                                            if cur_record not in missing_records:
+                                                missing_records[cur_record] = []
+
+                                            missing_records[cur_record].append(batch_name)
+
+                                # now the message
+                                main_message = ''
+                                for record_name, batches in missing_records.items():
+                                    main_message = '%s- %s for %s' % ('' if main_message == '' else main_message + "\n", record_name, ', '.join(batches))
+
+                                for recipient in recipients:
+                                    message = template.template % (recipient.first_name, main_message)
+
+                                    if recipient.tel:
+                                        print('\n%s: %s' % (template.template_name, message))
+                                        self.schedule_notification(template, recipient, message)
+                                        i = i + 1
+
+        queue.process_scheduled_sms(provider)
+        print('\nSent %d messages\n' % i)
+
+    def check_submitted_daily_records(self, farm_id):
+        # check if the expected daily records are submitted
+        # 1. Feed records
+        # 2. Egg production
+
+        records = {}
+        today = datetime.datetime.now()
+        batches = Batch.objects.filter(farm_id=farm_id, exit_date=None).exclude(batch_id__icontains='general').all()
+        for batch in batches:
+            cur_batch_name = ' '.join(batch.batch_name.split(' - ')[:2])
+            records[cur_batch_name] = {}
+            feed_record = OtherEvents.objects.filter(event_type='Feed Increment', batch_id=batch.id, event_date=today.strftime("%Y-%m-%d")).first()
+            records[cur_batch_name]['Feed records'] = None if feed_record is None else feed_record.event_val
+            
+            # lets look for a egg production record if need be
+            egg_prod = Production.objects.filter(product='Egg Production', batch_id=batch.id).count()
+            if egg_prod != 0:
+                today_egg_prod = Production.objects.filter(product='Egg Production', batch_id=batch.id, date_produced=today.strftime("%Y-%m-%d")).first()
+                records[cur_batch_name]['Egg production'] = None if today_egg_prod is None else today_egg_prod.no_units
+
+            # check for deaths
+            deaths = OtherEvents.objects.filter(event_type='Deaths', batch_id=batch.id, event_date=today.strftime("%Y-%m-%d")).first()
+            records[cur_batch_name]['Deaths'] = None if deaths is None else deaths.event_val
+
+        return records
