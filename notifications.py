@@ -534,6 +534,7 @@ class Notification():
             template_type = request.POST.get('message-type')
             template_message = request.POST.get('template-message')
             campaign_id = request.POST.get('campaign')
+            sending_time = request.POST.get('sending-time') or None
             mssg_uuid = uuid.uuid5(uuid.NAMESPACE_X500, template_message)
 
             # get the campaign names for this template
@@ -555,6 +556,9 @@ class Notification():
                     template=template_message,
                     uuid=mssg_uuid
                 )
+
+            if sending_time is not None:
+                template.sending_time=sending_time
             template.full_clean()
             template.save()
             transaction.commit()
