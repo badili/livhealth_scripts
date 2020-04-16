@@ -481,6 +481,8 @@ def notification_settings(request):
 
     except Exception as e:
         print(str(e))
+        sentry.captureException()
+        return redirect('/dashboard_v2/')
 
 
 @login_required(login_url='/login')
@@ -508,6 +510,8 @@ def sent_notifications(request):
 
     except Exception as e:
         print(str(e))
+        sentry.captureException()
+        return redirect('/dashboard_v2/')
 
 
 @login_required(login_url='/login')
