@@ -47,8 +47,12 @@ class Notification():
         if settings.AT_SENDER_ID is None:
             settings.AT_SENDER_ID = 'LivHealth'
 
-        # email environment
-        self.email_obj = Emails()
+        try:
+            # email environment
+            self.email_obj = Emails()
+        except:
+            # we might not be needing the email module as of now
+            pass
         self.env = Environment()
         self.env.loader = FileSystemLoader(settings.TEMPLATES[0]['DIRS'][0])
 
