@@ -2175,8 +2175,8 @@ class OdkForms():
                 template=template,
                 message=message,
                 recipient=recipient,
-                recipient_no=recipient.cell_no if recipient.cell_no else recipient.alternative_cell_no,
-                # recipient_no='+254726567797' if settings.DEBUG else recipient.cell_no if recipient.cell_no else recipient.alternative_cell_no,
+                # recipient_no=recipient.cell_no if recipient.cell_no else recipient.alternative_cell_no,
+                recipient_no='+254726567797' if settings.DEBUG else recipient.cell_no if recipient.cell_no else recipient.alternative_cell_no,
                 msg_status='SCHEDULED',
                 schedule_time=cur_time.strftime('%Y-%m-%d %H:%M:%S')
             )

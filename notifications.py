@@ -791,11 +791,26 @@ class Notification():
 
 
 class PazuriNotification():
-    def __init__(self):
+    def __init__(self, cur_user_email=None):
         self.time_formats = ['now', 'today', 'tomorrow', 'yesterday']
         self.at_ok_sending_status_codes = [100, 101, 102]
         if settings.AT_SENDER_ID is None:
             settings.AT_SENDER_ID = 'Pazuri'
+
+        try:
+            if cur_user_email is not None:
+                # save the cur user object
+                self.cur_user = Personnel.objects.filter(email=cur_user_email).get()
+
+                # get the farm of this user
+                self.cur_farm_id = self.cur_user.farm_id
+                self.cur_farm = Farm.objects.filter(id=self.cur_farm_id).get()
+            else:
+                self.cur_farm = None
+
+        except Exception as e:
+            terminal.tprint(str(e), 'fail')
+            sentry.captureException()
 
     def get_notification_settings(self, farm_id):
         """Get the settings defined for the different notifications
@@ -813,6 +828,15 @@ class PazuriNotification():
             terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise Exception(str(e))
+
+    def get_sent_notifications(self):
+        # get the list of sent notifications
+        if self.cur_user.is_superuser:
+            notifications = SMSQueue.objects.select_related('recipient').select_related('template').order_by('-schedule_time').all()
+        else:
+            notifications = SMSQueue.objects.select_related('recipient').select_related('template').filter(recipient__farm_id=self.cur_farm_id).order_by('-schedule_time').all()
+
+        return {'notifications': notifications}
 
     def save_recipient(self, request):
         try:
@@ -1043,7 +1067,7 @@ class PazuriNotification():
                         parts = template.sending_time.strftime('%H:%M:%S').split(':')
                         sending_time = cur_time.replace(hour=int(parts[0]), minute=int(parts[1]), second=int(parts[2]))
                         split_seconds = (cur_time - sending_time).total_seconds()
-                        print('\nCurrent Time == %s :: Sending Time == %s\nSplits\n````````````\n%.1f -- %.1f\n--\n' % (cur_time.strftime('%A %d-%m %H:%M:%S'), template.sending_time.strftime('%H:%M:%S'), split_seconds, settings.SENDING_SPLIT))
+                        print('\nCurrent Time == %s :: Sending Time == %s\nSplits\n````````````\n%.1f -- %.1f\n--\n' % (cur_time.strftime('%A %d-%m %H:%M:%S'), template.sending_time.strftime('%A %d-%m %H:%M:%S'), split_seconds, settings.SENDING_SPLIT))
 
                         if split_seconds > -1 and split_seconds < settings.SENDING_SPLIT:
                             # get the templates assigned to this campaign that needs to be processed
