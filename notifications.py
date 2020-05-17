@@ -73,7 +73,7 @@ class Notification():
         except Exception as e:
             transaction.rollback()
             sentry.captureException()
-            terminal.tprint(str(e), 'fail')
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
 
         terminal.tprint("The input file '%s' with test data has been processed successfully..." % input_file, 'info')
 
@@ -156,7 +156,7 @@ class Notification():
             except Recipients.DoesNotExist:
                 recipient = self.add_recipient(rec)
             except Exception as e:
-                terminal.tprint(str(e), 'fail')
+                if settings.DEBUG: terminal.tprint(str(e), 'fail')
                 sentry.captureException()
                 raise Exception(str(e))
 
@@ -201,7 +201,7 @@ class Notification():
 
             return cur_campaign
         except Exception as e:
-            terminal.tprint(str(e), 'fail')
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise
 
@@ -236,7 +236,7 @@ class Notification():
             recipient.save()
             return recipient
         except Exception as e:
-            terminal.tprint(str(e), 'fail')
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise Exception(str(e))
 
@@ -263,7 +263,7 @@ class Notification():
 
             return mssg_template
         except Exception as e:
-            terminal.tprint(str(e), 'fail')
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise Exception(str(e))
 
@@ -311,7 +311,7 @@ class Notification():
                     terminal.tprint('Sending the SMS via Nexmo...', 'info')
                     self.send_via_nexmo(sched_sms)
         except Exception as e:
-            terminal.tprint(str(e), 'fail')
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
 
         # def queue_via_at(self, mssg):
@@ -357,7 +357,7 @@ class Notification():
             mssg.full_clean()
             mssg.save()
         except Exception as e:
-            terminal.tprint(str(e), 'fail')
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise Exception(str(e))
 
@@ -371,7 +371,7 @@ class Notification():
             if delivery_type == 'delivery':
                 self.process_at_delivery_report(request)
         except Exception as e:
-            terminal.tprint(str(e), 'fail')
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise Exception(str(e))
 
@@ -395,7 +395,7 @@ class Notification():
                 queue_instance.full_clean()
                 queue_instance.save()
         except Exception as e:
-            terminal.tprint(str(e), 'fail')
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise Exception(str(e))
 
@@ -439,7 +439,7 @@ class Notification():
                 mssg.full_clean()
                 mssg.save()
         except Exception as e:
-            terminal.tprint(str(e), 'fail')
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise Exception(str(e))
 
@@ -453,7 +453,7 @@ class Notification():
             if delivery_type == 'delivery':
                 self.process_nexmo_delivery_report(request)
         except Exception as e:
-            terminal.tprint(str(e), 'fail')
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise Exception(str(e))
 
@@ -478,7 +478,7 @@ class Notification():
                 queue_instance.full_clean()
                 queue_instance.save()
         except Exception as e:
-            terminal.tprint(str(e), 'fail')
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise Exception(str(e))
 
@@ -498,7 +498,7 @@ class Notification():
 
             return data_set
         except Exception as e:
-            terminal.tprint(str(e), 'fail')
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise Exception(str(e))
 
@@ -527,7 +527,7 @@ class Notification():
             transaction.commit()
         except Exception as e:
             transaction.rollback()
-            terminal.tprint(str(e), 'fail')
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise Exception(str(e))
 
@@ -568,7 +568,7 @@ class Notification():
             transaction.commit()
         except Exception as e:
             transaction.rollback()
-            terminal.tprint(str(e), 'fail')
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise Exception(str(e))
 
@@ -651,7 +651,7 @@ class Notification():
             transaction.commit()
         except Exception as e:
             transaction.rollback()
-            terminal.tprint(str(e), 'fail')
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise Exception(str(e))
 
@@ -785,7 +785,7 @@ class Notification():
 
             Emails.send_email(email_settings['recipient_email'], email_settings['sender_email'], None, email_settings['subject'], email_html)
         except Exception as e:
-            terminal.tprint(str(e), 'fail')
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise Exception(str(e))
 
@@ -809,7 +809,7 @@ class PazuriNotification():
                 self.cur_farm = None
 
         except Exception as e:
-            terminal.tprint(str(e), 'fail')
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
 
     def get_notification_settings(self, farm_id):
@@ -825,7 +825,7 @@ class PazuriNotification():
 
             return data_set
         except Exception as e:
-            terminal.tprint(str(e), 'fail')
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise Exception(str(e))
 
@@ -917,7 +917,7 @@ class PazuriNotification():
             transaction.commit()
         except Exception as e:
             transaction.rollback()
-            terminal.tprint(str(e), 'fail')
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise Exception(str(e))
 
@@ -949,7 +949,7 @@ class PazuriNotification():
             transaction.commit()
         except Exception as e:
             transaction.rollback()
-            terminal.tprint(str(e), 'fail')
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise Exception(str(e))
 
@@ -977,7 +977,7 @@ class PazuriNotification():
 
             return queue_item
         except Exception as e:
-            terminal.tprint(str(e), 'fail')
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise Exception(str(e))
 
@@ -1029,7 +1029,7 @@ class PazuriNotification():
             transaction.commit()
         except Exception as e:
             transaction.rollback()
-            terminal.tprint(str(e), 'fail')
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise Exception('There was an error while confirming the registration.')
 
