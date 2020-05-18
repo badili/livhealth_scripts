@@ -10,9 +10,11 @@ import pytz
 import random
 import json
 
+from datetime import date
 from django.conf import settings
 from django.contrib.auth.hashers import make_password
 from django.db import transaction, connection
+from django.db.models import Q, Sum, Count, IntegerField, Min, Max, Avg
 from django.forms.models import model_to_dict
 from django.utils import timezone
 from raven import Client
@@ -30,7 +32,7 @@ try:
 except:
     # try importing stuff from PazuriPoultry
     from vendor.terminal_output import Terminal
-    from .models import SMSQueue, MessageTemplates, Personnel, Campaign, Farm, SubscriptionPayment, Batch, Production, OtherEvents, Farm, PERSONNEL_DESIGNATION_CHOICES
+    from .models import SMSQueue, MessageTemplates, Personnel, Campaign, Farm, SubscriptionPayment, Batch, Production, OtherEvents, Farm, IncomeExpense, PERSONNEL_DESIGNATION_CHOICES
     from .common_tasks import Emails
 
 terminal = Terminal()
@@ -1054,7 +1056,8 @@ class PazuriNotification():
         for farm in farms:
             # loop through the campaigns and determine the one that needs processing
             campaigns = Campaign.objects.filter(farm_id=farm.id).all()
-            records = None
+            daily_records = None
+            manager_daily_reports_data = None
             for campaign in campaigns:
                 if cur_time.strftime('%A') == campaign.schedule_time or campaign.schedule_time == 'Daily':
                     templates = MessageTemplates.objects.filter(campaign_id=campaign.id).all()
@@ -1069,15 +1072,15 @@ class PazuriNotification():
                         split_seconds = (cur_time - sending_time).total_seconds()
                         print('\nCurrent Time == %s :: Sending Time == %s\nSplits\n````````````\n%.1f -- %.1f\n--\n' % (cur_time.strftime('%A %d-%m %H:%M:%S'), template.sending_time.strftime('%A %d-%m %H:%M:%S'), split_seconds, settings.SENDING_SPLIT))
 
-                        if split_seconds > -1 and split_seconds < settings.SENDING_SPLIT:
+                        # if split_seconds > -1 and split_seconds < settings.SENDING_SPLIT:
+                        if 1:
                             # get the templates assigned to this campaign that needs to be processed
-                            if records is None:
-                                records = self.check_submitted_daily_records(farm.id)
-                            
                             if template.template_name == 'Daily Records Reminder':
+                                if daily_records is None:
+                                    daily_records = self.check_submitted_daily_records(farm.id)
                                 # format the data for daily records reminder. loop through all records and check the ones with None
                                 missing_records = {}
-                                for batch_name, record in records.items():
+                                for batch_name, record in daily_records.items():
                                     # cur_record = list(record.keys())[0]
                                     for cur_record in list(record.keys()):
                                         if cur_record in ('Feed records', 'Egg production'):
@@ -1090,14 +1093,17 @@ class PazuriNotification():
                                 main_message = ''
                                 for record_name, batches in missing_records.items():
                                     main_message = '%s- %s for %s' % ('' if main_message == '' else main_message + "\n", record_name, ', '.join(batches))
+                            elif template.template_name == 'Owner Daily Report':
+                                main_message = self.manager_daily_morning_report(farm.id)
+                                if main_message == '': main_message = ' No data recorded'
 
-                                for recipient in recipients:
-                                    message = template.template % (recipient.first_name, main_message)
+                            for recipient in recipients:
+                                message = template.template % (recipient.first_name, main_message)
 
-                                    if recipient.tel:
-                                        print('\n%s: %s' % (template.template_name, message))
-                                        self.schedule_notification(template, recipient, message)
-                                        i = i + 1
+                                if recipient.tel:
+                                    print('\n%s: %s' % (template.template_name, message))
+                                    # self.schedule_notification(template, recipient, message)
+                                    i = i + 1
 
         queue.process_scheduled_sms(provider)
         print('\nSent %d messages\n' % i)
@@ -1127,3 +1133,90 @@ class PazuriNotification():
             records[cur_batch_name]['Deaths'] = None if deaths is None else deaths.event_val
 
         return records
+
+    def manager_daily_morning_report(self, farm_id):
+        # process the manager's daily morning report of the previous day's activities
+        # 1. Income: KShs. %f,
+        # 2. Expenses: KShs. %f,
+        # 3. Eggs laid: %d (Batch01: %d, Batch02 %d),
+        # 4. Broilers sold: %d @ KShs %s, total %f,
+        # 5. Kienyeji sold: %d @ KShs %s, total %f,
+        # 6. Deaths: %d (Batch01: %d, Batch02 %d)
+        
+        try:
+            records = {}
+            yday = date.today() + datetime.timedelta(days=-1)
+            ie_dates = [yday.strftime("%Y-%m-%d")]
+            farm_batches = Batch.objects.filter(farm_id=farm_id).exclude(batch_id__icontains='general').values('id').all()
+            batches_ids = [f['id'] for f in farm_batches]
+
+            # income .. lets use 2019-05-24 which has a lot of entries
+            # Sales dates
+            # ie_date       count(*)
+            # 2019-08-07    5
+            # 2019-12-18    4
+            # 2019-12-21    4
+            # 2019-12-25    4
+            # 2020-01-04    4
+            # 2020-02-05    4
+            # 
+            # Expense dates
+            # ie_date       count(*)
+            # 2019-02-01    7
+            # 2019-05-24    10
+            # 2019-08-05    8
+            # 2019-09-18    6
+            # ie_dates = ['2019-08-07', '2019-12-18', '2019-12-21', '2019-12-25', '2020-01-04', '2020-02-05', '2019-02-01', '2019-05-24', '2019-08-05', '2019-09-18']
+
+            # process the incomes and expenses
+            # yday_incomes = IncomeExpense.objects.filter(ie_date=yday.strftime("%Y-%m-%d"), ie_type='Sale', batch_id__in=batches_ids).all()
+            yday_incomes = IncomeExpense.objects.filter(ie_date__in=ie_dates, batch_id__in=batches_ids).all()
+            total_income = 0
+            total_expense = 0
+            for inc in yday_incomes:
+                print("%s - %s - %d - %f" % (inc.ie_name, inc.ie_type, inc.no_units, inc.unit_cost))
+                this_total = inc.no_units * inc.unit_cost
+                
+                if inc.ie_type == 'Sale':
+                    total_income = total_income + (this_total / 2) if re.match('^Half', inc.ie_name) else total_income + this_total
+                elif inc.ie_type == 'Expense':
+                    total_expense = total_expense + this_total
+
+            income_narrative = " Income: KShs. %s" % '{:,.1f}'.format(total_income) if total_income > 0 else ''
+            expensse_narrative = " Expense: KShs. %s" % '{:,.1f}'.format(total_expense) if total_expense > 0 else ''
+
+            # get the eggs laid
+            egg_prod = Production.objects.select_related('batch').filter(date_produced__in=ie_dates, batch_id__in=batches_ids).values('batch__batch_id').annotate(total_eggs=Sum('no_units'))
+            if len(egg_prod) == 0:
+                egg_narrative = ''
+            elif len(egg_prod) == 1:
+                egg_narrative = " %d Eggs laid (%s)" % (egg_prod[0]['total_eggs'], egg_prod[0]['batch__batch_id'].capitalize())
+            else:
+                narrative = ', '.join(["%s: %d" % (ep['batch__batch_id'].capitalize(), ep['total_eggs']) for ep in egg_prod])
+                a = [ep['total_eggs'] for ep in egg_prod]
+                total_eggs = sum(map(lambda x:x,a))
+                egg_narrative = " %d Eggs laid (%s)" % (total_eggs, narrative)
+
+            # get the deaths
+            all_deaths = OtherEvents.objects.select_related('batch').filter(event_date__in=ie_dates, event_type='Deaths', batch_id__in=batches_ids).values('batch__batch_id').annotate(total_deaths=Sum('event_val'))
+            if len(all_deaths) == 0:
+                deaths_narrative = ''
+            elif len(all_deaths) == 1:
+                deaths_narrative = " %d Deaths (%s)" % (all_deaths[0]['total_deaths'], all_deaths[0]['batch__batch_id'].capitalize())
+            else:
+                narrative = ', '.join(["%d Deaths (%s)" % (ep['batch__batch_id'].capitalize(), ep['total_deaths']) for ep in all_deaths])
+                a = [ep['total_deaths'] for ep in all_deaths]
+                total_deaths = sum(map(lambda x:x,a))
+                deaths_narrative = " %d Deaths (%s)" % (total_deaths, narrative)
+
+            # now string all the reports together
+            message_body = income_narrative
+            message_body = expensse_narrative if message_body == '' else "%s\n%s" % (message_body, expensse_narrative)
+            message_body = egg_narrative if message_body == '' else "%s\n%s" % (message_body, egg_narrative)
+            message_body = deaths_narrative if message_body == '' else "%s\n%s" % (message_body, deaths_narrative)
+
+            return message_body
+        except Exception as e:
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
+            sentry.captureException()
+            raise Exception("There was an error while processing the manager's daily report")
