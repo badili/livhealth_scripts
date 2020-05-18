@@ -347,7 +347,7 @@ class Notification():
             this_resp = self.at_sms.send(mssg.message, [mssg.recipient_no], enqueue=False)
             # print(this_resp)
             if len(this_resp['SMSMessageData']['Recipients']) == 0:
-                print(mssg)
+                # print(mssg)
                 raise Exception(this_resp['SMSMessageData']['Message'])
             if this_resp['SMSMessageData']['Recipients'][0]['statusCode'] in self.at_ok_sending_status_codes:
                 # if the message is processed well, add the results to the db
@@ -1057,13 +1057,13 @@ class PazuriNotification():
             # loop through the campaigns and determine the one that needs processing
             campaigns = Campaign.objects.filter(farm_id=farm.id).all()
             daily_records = None
-            manager_daily_reports_data = None
+            admin_reports = None
             for campaign in campaigns:
                 if cur_time.strftime('%A') == campaign.schedule_time or campaign.schedule_time == 'Daily':
                     templates = MessageTemplates.objects.filter(campaign_id=campaign.id).all()
                     # get the users in this campaign
                     user_groups = campaign.recipients.split(',')
-                    recipients = Personnel.objects.filter(designation__in=user_groups, is_active=1)
+                    recipients = Personnel.objects.filter(designation__in=user_groups, is_active=1, farm_id=farm.id)
 
                     for template in templates:
                         # check if this template should be send now...
@@ -1094,15 +1094,30 @@ class PazuriNotification():
                                 for record_name, batches in missing_records.items():
                                     main_message = '%s- %s for %s' % ('' if main_message == '' else main_message + "\n", record_name, ', '.join(batches))
                             elif template.template_name == 'Owner Daily Report':
-                                main_message = self.manager_daily_morning_report(farm.id)
-                                if main_message == '': main_message = ' No data recorded'
+                                if admin_reports is None: admin_reports = self.admin_daily_morning_report(farm.id)
 
+                                # now string all the reports together
+                                main_message = admin_reports['income_narrative']
+                                main_message = admin_reports['expense_narrative'] if main_message == '' else "%s\n%s" % (main_message, admin_reports['expense_narrative'])
+                                main_message = admin_reports['egg_narrative'] if main_message == '' else "%s\n%s" % (main_message, admin_reports['egg_narrative'])
+                                main_message = admin_reports['deaths_narrative'] if main_message == '' else "%s\n%s" % (main_message, admin_reports['deaths_narrative'])
+
+                                if main_message == '': main_message = ' No data recorded'
+                            elif template.template_name == 'Supervisor Daily Report':
+                                if admin_reports is None: admin_reports = self.admin_daily_morning_report(farm.id)
+    
+                                # now string all the reports together
+                                main_message = admin_reports['egg_narrative']
+                                main_message = admin_reports['deaths_narrative'] if main_message == '' else "%s\n%s" % (main_message, admin_reports['deaths_narrative'])
+
+                                if main_message == '': main_message = ' No data recorded'
+                            
                             for recipient in recipients:
                                 message = template.template % (recipient.first_name, main_message)
 
                                 if recipient.tel:
-                                    print('\n%s: %s' % (template.template_name, message))
-                                    # self.schedule_notification(template, recipient, message)
+                                    print('\n%s:\n%s' % (template.template_name, message))
+                                    self.schedule_notification(template, recipient, message)
                                     i = i + 1
 
         queue.process_scheduled_sms(provider)
@@ -1134,7 +1149,7 @@ class PazuriNotification():
 
         return records
 
-    def manager_daily_morning_report(self, farm_id):
+    def admin_daily_morning_report(self, farm_id):
         # process the manager's daily morning report of the previous day's activities
         # 1. Income: KShs. %f,
         # 2. Expenses: KShs. %f,
@@ -1174,7 +1189,7 @@ class PazuriNotification():
             total_income = 0
             total_expense = 0
             for inc in yday_incomes:
-                print("%s - %s - %d - %f" % (inc.ie_name, inc.ie_type, inc.no_units, inc.unit_cost))
+                # print("%s - %s - %d - %f" % (inc.ie_name, inc.ie_type, inc.no_units, inc.unit_cost))
                 this_total = inc.no_units * inc.unit_cost
                 
                 if inc.ie_type == 'Sale':
@@ -1182,40 +1197,34 @@ class PazuriNotification():
                 elif inc.ie_type == 'Expense':
                     total_expense = total_expense + this_total
 
-            income_narrative = " Income: KShs. %s" % '{:,.1f}'.format(total_income) if total_income > 0 else ''
-            expensse_narrative = " Expense: KShs. %s" % '{:,.1f}'.format(total_expense) if total_expense > 0 else ''
+            income_narrative = "Income: KShs. %s" % '{:,.1f}'.format(total_income) if total_income > 0 else ''
+            expense_narrative = "Expense: KShs. %s" % '{:,.1f}'.format(total_expense) if total_expense > 0 else ''
 
             # get the eggs laid
             egg_prod = Production.objects.select_related('batch').filter(date_produced__in=ie_dates, batch_id__in=batches_ids).values('batch__batch_id').annotate(total_eggs=Sum('no_units'))
             if len(egg_prod) == 0:
                 egg_narrative = ''
             elif len(egg_prod) == 1:
-                egg_narrative = " %d Eggs laid (%s)" % (egg_prod[0]['total_eggs'], egg_prod[0]['batch__batch_id'].capitalize())
+                egg_narrative = "%d Eggs laid (%s)" % (egg_prod[0]['total_eggs'], egg_prod[0]['batch__batch_id'].capitalize())
             else:
                 narrative = ', '.join(["%s: %d" % (ep['batch__batch_id'].capitalize(), ep['total_eggs']) for ep in egg_prod])
                 a = [ep['total_eggs'] for ep in egg_prod]
                 total_eggs = sum(map(lambda x:x,a))
-                egg_narrative = " %d Eggs laid (%s)" % (total_eggs, narrative)
+                egg_narrative = "%d Eggs laid (%s)" % (total_eggs, narrative)
 
             # get the deaths
             all_deaths = OtherEvents.objects.select_related('batch').filter(event_date__in=ie_dates, event_type='Deaths', batch_id__in=batches_ids).values('batch__batch_id').annotate(total_deaths=Sum('event_val'))
             if len(all_deaths) == 0:
                 deaths_narrative = ''
             elif len(all_deaths) == 1:
-                deaths_narrative = " %d Deaths (%s)" % (all_deaths[0]['total_deaths'], all_deaths[0]['batch__batch_id'].capitalize())
+                deaths_narrative = "%d Deaths (%s)" % (all_deaths[0]['total_deaths'], all_deaths[0]['batch__batch_id'].capitalize())
             else:
                 narrative = ', '.join(["%d Deaths (%s)" % (ep['batch__batch_id'].capitalize(), ep['total_deaths']) for ep in all_deaths])
                 a = [ep['total_deaths'] for ep in all_deaths]
                 total_deaths = sum(map(lambda x:x,a))
-                deaths_narrative = " %d Deaths (%s)" % (total_deaths, narrative)
+                deaths_narrative = "%d Deaths (%s)" % (total_deaths, narrative)
 
-            # now string all the reports together
-            message_body = income_narrative
-            message_body = expensse_narrative if message_body == '' else "%s\n%s" % (message_body, expensse_narrative)
-            message_body = egg_narrative if message_body == '' else "%s\n%s" % (message_body, egg_narrative)
-            message_body = deaths_narrative if message_body == '' else "%s\n%s" % (message_body, deaths_narrative)
-
-            return message_body
+            return {'income_narrative':income_narrative, 'expense_narrative':expense_narrative, 'egg_narrative':egg_narrative, 'deaths_narrative':deaths_narrative}
         except Exception as e:
             if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
