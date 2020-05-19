@@ -32,7 +32,7 @@ try:
 except:
     # try importing stuff from PazuriPoultry
     from vendor.terminal_output import Terminal
-    from .models import SMSQueue, MessageTemplates, Personnel, Campaign, Farm, SubscriptionPayment, Batch, Production, OtherEvents, Farm, IncomeExpense, PERSONNEL_DESIGNATION_CHOICES
+    from .models import SMSQueue, MessageTemplates, Personnel, Campaign, Farm, SubscriptionPayment, Batch, Production, EventsSchedule, EventsList, OtherEvents, Farm, IncomeExpense, PERSONNEL_DESIGNATION_CHOICES
     from .common_tasks import Emails
 
 terminal = Terminal()
@@ -1053,6 +1053,7 @@ class PazuriNotification():
         cur_time = timezone.localtime(timezone.now())
         i = 0
         farms = Farm.objects.all()
+        kesho = date.today() + datetime.timedelta(days=1)
         for farm in farms:
             # loop through the campaigns and determine the one that needs processing
             campaigns = Campaign.objects.filter(farm_id=farm.id).all()
@@ -1094,6 +1095,12 @@ class PazuriNotification():
                                 for record_name, batches in missing_records.items():
                                     main_message = '%s- %s for %s' % ('' if main_message == '' else main_message + "\n", record_name, ', '.join(batches))
 
+                                if main_message != '': main_message = main_message + "\n- Any other record"
+
+                                # check if there is a scheduled event for tomorrow
+                                kesho_events_narrative = self.scheduled_events(farm.id, kesho)
+                                main_message = kesho_events_narrative if main_message == '' else main_message + "\n\n" + kesho_events_narrative
+
                                 # ensure that we have someone to send this message to
                                 if len(recipients) == 0:
                                     # send the message to the supervisor, else to the owner
@@ -1110,12 +1117,18 @@ class PazuriNotification():
                                 main_message = admin_reports['deaths_narrative'] if main_message == '' else "%s\n%s" % (main_message, admin_reports['deaths_narrative'])
 
                                 if main_message == '': main_message = ' No data recorded'
+
+                                # this should be the last part of the message
+                                main_message = admin_reports['kesho_events_narrative'] if main_message == '' else "%s\n\n%s" % (main_message, admin_reports['kesho_events_narrative'])
                             elif template.template_name == 'Supervisor Daily Report':
                                 if admin_reports is None: admin_reports = self.admin_daily_morning_report(farm.id)
     
                                 # now string all the reports together
                                 main_message = admin_reports['egg_narrative']
                                 main_message = admin_reports['deaths_narrative'] if main_message == '' else "%s\n%s" % (main_message, admin_reports['deaths_narrative'])
+
+                                # this should be the last part of the message
+                                main_message = admin_reports['kesho_events_narrative'] if main_message == '' else "%s\n\n%s" % (main_message, admin_reports['kesho_events_narrative'])
 
                                 if main_message == '': main_message = ' No data recorded'
                             
@@ -1168,6 +1181,7 @@ class PazuriNotification():
         try:
             records = {}
             yday = date.today() + datetime.timedelta(days=-1)
+            kesho = date.today() + datetime.timedelta(days=1)
             ie_dates = [yday.strftime("%Y-%m-%d")]
             farm_batches = Batch.objects.filter(farm_id=farm_id).exclude(batch_id__icontains='general').values('id').all()
             batches_ids = [f['id'] for f in farm_batches]
@@ -1231,8 +1245,33 @@ class PazuriNotification():
                 total_deaths = sum(map(lambda x:x,a))
                 deaths_narrative = "%d Deaths (%s)" % (total_deaths, narrative)
 
-            return {'income_narrative':income_narrative, 'expense_narrative':expense_narrative, 'egg_narrative':egg_narrative, 'deaths_narrative':deaths_narrative}
+            # check if there is a scheduled event for tomorrow
+            kesho_events_narrative = self.scheduled_events(farm_id, kesho)
+
+            return {'income_narrative':income_narrative, 'expense_narrative':expense_narrative, 'egg_narrative':egg_narrative, 'deaths_narrative':deaths_narrative, 'kesho_events_narrative':kesho_events_narrative}
         except Exception as e:
             if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise Exception("There was an error while processing the manager's daily report")
+
+    def scheduled_events(self, farm_id, event_date):
+        # check if we have any events scheduled for tomorrow,
+        # if there is, format them as notifications
+        #print(event_date.strftime("%Y-%m-%d"))
+        farm_batches = Batch.objects.filter(farm_id=farm_id).exclude(batch_id__icontains='general').values('id').all()
+        batches_ids = [f['id'] for f in farm_batches]
+        events = EventsSchedule.objects.select_related('event', 'batch').filter(batch_id__in=batches_ids, schedule_date=event_date.strftime("%Y-%m-%d")).all()
+
+        kesho_events_narrative = ''
+        for ev in events:
+            if ev.event.event_type == 'Vaccination': cur_narrative = "vaccinate '%s' against %s" % (ev.batch.batch_name, ev.event.event_name)
+            elif ev.event.event_type == 'Deworming': cur_narrative = "deworm '%s'" % ev.batch.batch_name
+            elif ev.event.event_name == 'Weighing': cur_narrative = "weigh '%s'" % ev.batch.batch_name
+            else: cur_narrative = "%s '%s'" % (ev.event.event_name, ev.batch.batch_name)
+
+            kesho_events_narrative = cur_narrative if kesho_events_narrative == '' else kesho_events_narrative + ', ' + cur_narrative
+        
+        if kesho_events_narrative != '': kesho_events_narrative = "Remember tomorrow to %s" % kesho_events_narrative
+
+        return kesho_events_narrative
+
