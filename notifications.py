@@ -1093,6 +1093,13 @@ class PazuriNotification():
                                 main_message = ''
                                 for record_name, batches in missing_records.items():
                                     main_message = '%s- %s for %s' % ('' if main_message == '' else main_message + "\n", record_name, ', '.join(batches))
+
+                                # ensure that we have someone to send this message to
+                                if len(recipients) == 0:
+                                    # send the message to the supervisor, else to the owner
+                                    recipients = Personnel.objects.filter(designation='supervisor', is_active=1, farm_id=farm.id)
+                                    if len(recipients) == 0:
+                                        recipients = Personnel.objects.filter(designation='manager', is_active=1, farm_id=farm.id)
                             elif template.template_name == 'Owner Daily Report':
                                 if admin_reports is None: admin_reports = self.admin_daily_morning_report(farm.id)
 
