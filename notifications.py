@@ -1084,7 +1084,7 @@ class PazuriNotification():
                                 for batch_name, record in daily_records.items():
                                     # cur_record = list(record.keys())[0]
                                     for cur_record in list(record.keys()):
-                                        if cur_record in ('Feed records', 'Egg production'):
+                                        if cur_record in ('Feed records', 'Egg production') and record[cur_record] is None:
                                             if cur_record not in missing_records:
                                                 missing_records[cur_record] = []
 
@@ -1104,9 +1104,9 @@ class PazuriNotification():
                                 # ensure that we have someone to send this message to
                                 if len(recipients) == 0:
                                     # send the message to the supervisor, else to the owner
-                                    recipients = Personnel.objects.filter(designation='supervisor', is_active=1, farm_id=farm.id)
+                                    recipients = Personnel.objects.filter(designation='supervisor', is_active=1, farm_id=farm.id).all()
                                     if len(recipients) == 0:
-                                        recipients = Personnel.objects.filter(designation='manager', is_active=1, farm_id=farm.id)
+                                        recipients = Personnel.objects.filter(designation='manager', is_active=1, farm_id=farm.id).all()
                             elif template.template_name == 'Owner Daily Report':
                                 if admin_reports is None: admin_reports = self.admin_daily_morning_report(farm.id)
 
