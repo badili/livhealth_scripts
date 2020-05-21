@@ -1097,6 +1097,9 @@ class PazuriNotification():
 
                                 if main_message != '': main_message = main_message + "\n- Any other record"
 
+                                # if we have nothing to say, just keep quiet
+                                if main_message == '': continue
+
                                 # check if there is a scheduled event for tomorrow
                                 kesho_events_narrative = self.scheduled_events(farm.id, kesho)
                                 main_message = kesho_events_narrative if main_message == '' else main_message + "\n\n" + kesho_events_narrative
@@ -1112,9 +1115,14 @@ class PazuriNotification():
 
                                 # now string all the reports together
                                 main_message = admin_reports['income_narrative']
-                                main_message = admin_reports['expense_narrative'] if main_message == '' else "%s\n%s" % (main_message, admin_reports['expense_narrative'])
-                                main_message = admin_reports['egg_narrative'] if main_message == '' else "%s\n%s" % (main_message, admin_reports['egg_narrative'])
-                                main_message = admin_reports['deaths_narrative'] if main_message == '' else "%s\n%s" % (main_message, admin_reports['deaths_narrative'])
+                                if admin_reports['expense_narrative'] != '':
+                                    main_message = admin_reports['expense_narrative'] if main_message == '' else "%s\n%s" % (main_message, admin_reports['expense_narrative'])
+                                
+                                if admin_reports['egg_narrative'] != '':
+                                    main_message = admin_reports['egg_narrative'] if main_message == '' else "%s\n%s" % (main_message, admin_reports['egg_narrative'])
+
+                                if admin_reports['deaths_narrative'] != '':
+                                    main_message = admin_reports['deaths_narrative'] if main_message == '' else "%s\n%s" % (main_message, admin_reports['deaths_narrative'])
 
                                 if main_message == '': main_message = ' No data recorded'
 
