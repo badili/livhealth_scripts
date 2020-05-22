@@ -1191,8 +1191,11 @@ class PazuriNotification():
             yday = date.today() + datetime.timedelta(days=-1)
             kesho = date.today() + datetime.timedelta(days=1)
             ie_dates = [yday.strftime("%Y-%m-%d")]
-            farm_batches = Batch.objects.filter(farm_id=farm_id).exclude(batch_id__icontains='general').values('id').all()
-            batches_ids = [f['id'] for f in farm_batches]
+            poultry_batches = Batch.objects.filter(farm_id=farm_id).exclude(batch_id__icontains='general').values('id').all()
+            batches_ids = [f['id'] for f in poultry_batches]
+
+            all_batches = Batch.objects.filter(farm_id=farm_id).values('id').all()
+            batches_incl_gen = [f['id'] for f in all_batches]
 
             # income .. lets use 2019-05-24 which has a lot of entries
             # Sales dates
@@ -1213,8 +1216,8 @@ class PazuriNotification():
             # ie_dates = ['2019-08-07', '2019-12-18', '2019-12-21', '2019-12-25', '2020-01-04', '2020-02-05', '2019-02-01', '2019-05-24', '2019-08-05', '2019-09-18']
 
             # process the incomes and expenses
-            # yday_incomes = IncomeExpense.objects.filter(ie_date=yday.strftime("%Y-%m-%d"), ie_type='Sale', batch_id__in=batches_ids).all()
-            yday_incomes = IncomeExpense.objects.filter(ie_date__in=ie_dates, batch_id__in=batches_ids).all()
+            # yday_incomes = IncomeExpense.objects.filter(ie_date=yday.strftime("%Y-%m-%d"), ie_type='Sale', batch_id__in=batches_incl_gen).all()
+            yday_incomes = IncomeExpense.objects.filter(ie_date__in=ie_dates, batch_id__in=batches_incl_gen).all()
             total_income = 0
             total_expense = 0
             for inc in yday_incomes:
