@@ -1083,8 +1083,8 @@ class PazuriNotification():
                         split_seconds = (cur_time - sending_time).total_seconds()
                         print('\nCurrent Time == %s :: Sending Time == %s\nSplits\n````````````\n%.1f -- %.1f\n--\n' % (cur_time.strftime('%A %d-%m %H:%M:%S'), template.sending_time.strftime('%A %d-%m %H:%M:%S'), split_seconds, settings.SENDING_SPLIT))
 
-                        if 1:
-                            # if split_seconds > -1 and split_seconds < settings.SENDING_SPLIT:
+                        # if 1:
+                        if split_seconds > -1 and split_seconds < settings.SENDING_SPLIT:
                             # get the templates assigned to this campaign that needs to be processed
                             if template.template_name == 'Daily Records Reminder':
                                 if daily_records is None:
@@ -1159,7 +1159,7 @@ class PazuriNotification():
 
                                 if recipient.tel:
                                     print('\n%s:\n%s' % (template.template_name, message))
-                                    # self.schedule_notification(template, recipient, message)
+                                    self.schedule_notification(template, recipient, message)
                                     i = i + 1
 
         queue.process_scheduled_sms(provider)
