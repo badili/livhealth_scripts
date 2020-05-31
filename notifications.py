@@ -58,6 +58,9 @@ class Notification():
         self.env = Environment()
         self.env.loader = FileSystemLoader(settings.TEMPLATES[0]['DIRS'][0])
 
+        # testing messages
+        self.testing_numbers = ['%s%s' % (settings.TESTING_PREFIX, x) for x in range(settings.TESTING_PHONE_NUMBERS_START, settings.TESTING_PHONE_NUMBERS_END)]
+
     def process_test_data(self, input_file):
         """Given an input file, imports the data to the DB
 
@@ -297,15 +300,21 @@ class Notification():
             # fetch the sms whose sending schedule time has passed
             sms2send = SMSQueue.objects.filter(schedule_time__lte=cur_time_str, msg_status__in=statuses_to_use).order_by('id').all()
             for sched_sms in sms2send:
+                if sched_sms.recipient_no in self.testing_numbers:
+                    # we have a testing message, don't send it
+                    continue
                 # print('%s: %s - %s' % (sched_sms.id, sched_sms.schedule_time, sched_sms.recipient_no))
                 print('Seconds Diff\n````````````\n%.1f -- %d\n--\n' % ((cur_time - sched_sms.schedule_time).total_seconds(), settings.MESSAGE_VALIDITY * 60 * 60))
                 if (cur_time - sched_sms.schedule_time).total_seconds() > settings.MESSAGE_VALIDITY * 60 * 60:
-                    print('The message is expired...')
+                    if settings.DEBUG: print('The message is expired...')
+                    sentry.captureMessage("Expired message to %s: '%s'" % (sched_sms.recipient_no, sched_sms.message), level='warning', extra={'cur_time': cur_time_str, 'scheduled_time': sched_sms.schedule_time.strftime('%Y-%m-%d %H:%M:%S'), 'message_validity': '%d Sec' % settings.MESSAGE_VALIDITY * 60 * 60})
                     sched_sms.msg_status = 'EXPIRED'
                     sched_sms.full_clean()
                     sched_sms.save()
                     continue
 
+                # if we have testing messages, don't send them
+                
                 if use_provider == 'at':
                     terminal.tprint('Sending the SMS via AT...', 'info')
                     self.send_via_at(sched_sms)
@@ -1065,6 +1074,7 @@ class PazuriNotification():
                     # get the users in this campaign
                     user_groups = campaign.recipients.split(',')
                     recipients = Personnel.objects.filter(designation__in=user_groups, is_active=1, farm_id=farm.id)
+                    farm_batches = Batch.objects.filter(farm_id=farm.id, exit_date=None).exclude(batch_id__icontains='general').all()
 
                     for template in templates:
                         # check if this template should be send now...
@@ -1073,8 +1083,8 @@ class PazuriNotification():
                         split_seconds = (cur_time - sending_time).total_seconds()
                         print('\nCurrent Time == %s :: Sending Time == %s\nSplits\n````````````\n%.1f -- %.1f\n--\n' % (cur_time.strftime('%A %d-%m %H:%M:%S'), template.sending_time.strftime('%A %d-%m %H:%M:%S'), split_seconds, settings.SENDING_SPLIT))
 
-                        if split_seconds > -1 and split_seconds < settings.SENDING_SPLIT:
-                        # if 1:
+                        if 1:
+                            # if split_seconds > -1 and split_seconds < settings.SENDING_SPLIT:
                             # get the templates assigned to this campaign that needs to be processed
                             if template.template_name == 'Daily Records Reminder':
                                 if daily_records is None:
@@ -1093,7 +1103,11 @@ class PazuriNotification():
                                 # now the message
                                 main_message = ''
                                 for record_name, batches in missing_records.items():
-                                    main_message = '%s- %s for %s' % ('' if main_message == '' else main_message + "\n", record_name, ', '.join(batches))
+                                    if len(farm_batches) == len(batches):
+                                        # we are missing data for all the necessary batches
+                                        main_message = '%s- %s for all batches' % ('' if main_message == '' else main_message + "\n", record_name)
+                                    else:
+                                        main_message = '%s- %s for %s' % ('' if main_message == '' else main_message + "\n", record_name, ', '.join(batches))
 
                                 if main_message != '': main_message = main_message + "\n- Any other record"
 
@@ -1145,7 +1159,7 @@ class PazuriNotification():
 
                                 if recipient.tel:
                                     print('\n%s:\n%s' % (template.template_name, message))
-                                    self.schedule_notification(template, recipient, message)
+                                    # self.schedule_notification(template, recipient, message)
                                     i = i + 1
 
         queue.process_scheduled_sms(provider)
@@ -1160,7 +1174,8 @@ class PazuriNotification():
         today = datetime.datetime.now()
         batches = Batch.objects.filter(farm_id=farm_id, exit_date=None).exclude(batch_id__icontains='general').all()
         for batch in batches:
-            cur_batch_name = ' '.join(batch.batch_name.split(' - ')[:2])
+            cur_batch_name = self.format_batch_name(batch.batch_id, batch.batch_name)
+            # cur_batch_name = ' '.join(batch.batch_name.split(' - ')[:2])
             records[cur_batch_name] = {}
             feed_record = OtherEvents.objects.filter(event_type='Feed Increment', batch_id=batch.id, event_date=today.strftime("%Y-%m-%d")).first()
             records[cur_batch_name]['Feed records'] = None if feed_record is None else feed_record.event_val
@@ -1275,10 +1290,11 @@ class PazuriNotification():
 
         kesho_events_narrative = ''
         for ev in events:
-            if ev.event.event_type == 'Vaccination': cur_narrative = "vaccinate '%s' against %s" % (ev.batch.batch_name, ev.event.event_name)
-            elif ev.event.event_type == 'Deworming': cur_narrative = "deworm '%s'" % ev.batch.batch_name
-            elif ev.event.event_name == 'Weighing': cur_narrative = "weigh '%s'" % ev.batch.batch_name
-            else: cur_narrative = "%s '%s'" % (ev.event.event_name, ev.batch.batch_name)
+            cur_batch_name = self.format_batch_name(ev.batch.batch_id, ev.batch.batch_name)
+            if ev.event.event_type == 'Vaccination': cur_narrative = "vaccinate %s against %s" % (cur_batch_name, ev.event.event_name)
+            elif ev.event.event_type == 'Deworming': cur_narrative = "deworm %s" % cur_batch_name
+            elif ev.event.event_name == 'Weighing': cur_narrative = "weigh %s" % cur_batch_name
+            else: cur_narrative = "%s %s" % (ev.event.event_name, cur_batch_name)
 
             kesho_events_narrative = cur_narrative if kesho_events_narrative == '' else kesho_events_narrative + ', ' + cur_narrative
         
@@ -1286,3 +1302,10 @@ class PazuriNotification():
 
         return kesho_events_narrative
 
+    def format_batch_name(self, batch_id, batch_name):
+        # given a batch name, try and compress it to save characters in an SMS
+        a = re.match('^(Batch\s\d+).+', batch_name)
+        if a:
+            return a[1]
+        else:
+            batch_id.capitalize()
