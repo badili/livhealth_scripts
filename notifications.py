@@ -1081,7 +1081,7 @@ class PazuriNotification():
                         parts = template.sending_time.strftime('%H:%M:%S').split(':')
                         sending_time = cur_time.replace(hour=int(parts[0]), minute=int(parts[1]), second=int(parts[2]))
                         split_seconds = (cur_time - sending_time).total_seconds()
-                        print('\nCurrent Time == %s :: Sending Time == %s\nSplits\n````````````\n%.1f -- %.1f\n--\n' % (cur_time.strftime('%A %d-%m %H:%M:%S'), template.sending_time.strftime('%A %d-%m %H:%M:%S'), split_seconds, settings.SENDING_SPLIT))
+                        # print('\nCurrent Time == %s :: Sending Time == %s\nSplits\n````````````\n%.1f -- %.1f\n--\n' % (cur_time.strftime('%A %d-%m %H:%M:%S'), template.sending_time.strftime('%A %d-%m %H:%M:%S'), split_seconds, settings.SENDING_SPLIT))
 
                         # if 1:
                         if split_seconds > -1 and split_seconds < settings.SENDING_SPLIT:
@@ -1116,7 +1116,8 @@ class PazuriNotification():
 
                                 # check if there is a scheduled event for tomorrow
                                 kesho_events_narrative = self.scheduled_events(farm.id, kesho)
-                                main_message = kesho_events_narrative if main_message == '' else main_message + "\n\n" + kesho_events_narrative
+                                if kesho_events_narrative != '':
+                                    main_message = kesho_events_narrative if main_message == '' else main_message + "\n\n" + kesho_events_narrative
 
                                 # ensure that we have someone to send this message to
                                 if len(recipients) == 0:
@@ -1127,8 +1128,10 @@ class PazuriNotification():
                             elif template.template_name == 'Owner Daily Report':
                                 if admin_reports is None: admin_reports = self.admin_daily_morning_report(farm.id)
 
+                                main_message = ''
                                 # now string all the reports together
-                                main_message = admin_reports['income_narrative']
+                                if admin_reports['income_narrative'] != '':
+                                    main_message = admin_reports['income_narrative']
                                 if admin_reports['expense_narrative'] != '':
                                     main_message = admin_reports['expense_narrative'] if main_message == '' else "%s\n%s" % (main_message, admin_reports['expense_narrative'])
                                 
@@ -1141,16 +1144,21 @@ class PazuriNotification():
                                 if main_message == '': main_message = ' No data recorded'
 
                                 # this should be the last part of the message
-                                main_message = admin_reports['kesho_events_narrative'] if main_message == '' else "%s\n\n%s" % (main_message, admin_reports['kesho_events_narrative'])
+                                if admin_reports['kesho_events_narrative'] != '':
+                                    main_message = admin_reports['kesho_events_narrative'] if main_message == '' else "%s\n\n%s" % (main_message, admin_reports['kesho_events_narrative'])
                             elif template.template_name == 'Supervisor Daily Report':
                                 if admin_reports is None: admin_reports = self.admin_daily_morning_report(farm.id)
     
                                 # now string all the reports together
-                                main_message = admin_reports['egg_narrative']
-                                main_message = admin_reports['deaths_narrative'] if main_message == '' else "%s\n%s" % (main_message, admin_reports['deaths_narrative'])
+                                if admin_reports['egg_narrative'] != '':
+                                    main_message = admin_reports['egg_narrative']
+
+                                if admin_reports['deaths_narrative'] != '':
+                                    main_message = admin_reports['deaths_narrative'] if main_message == '' else "%s\n%s" % (main_message, admin_reports['deaths_narrative'])
 
                                 # this should be the last part of the message
-                                main_message = admin_reports['kesho_events_narrative'] if main_message == '' else "%s\n\n%s" % (main_message, admin_reports['kesho_events_narrative'])
+                                if admin_reports['kesho_events_narrative'] != '':
+                                    main_message = admin_reports['kesho_events_narrative'] if main_message == '' else "%s\n\n%s" % (main_message, admin_reports['kesho_events_narrative'])
 
                                 if main_message == '': main_message = ' No data recorded'
                             
@@ -1158,7 +1166,7 @@ class PazuriNotification():
                                 message = template.template % (recipient.first_name, main_message)
 
                                 if recipient.tel:
-                                    print('\n%s:\n%s' % (template.template_name, message))
+                                    print('\nSending %s to %s \n%s' % (template.template_name, recipient.first_name, message))
                                     self.schedule_notification(template, recipient, message)
                                     i = i + 1
 
