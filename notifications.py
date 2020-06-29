@@ -352,8 +352,8 @@ class Notification():
             cur_time = cur_time.strftime('%Y-%m-%d %H:%M:%S')
             # lets send the messages synchronously... should be changed to async
             # How does AT identify a message when a callback is given
-            # this_resp = self.at_sms.send(mssg.message, [mssg.recipient_no], settings.AT_SENDER_ID, enqueue=False)
-            this_resp = self.at_sms.send(mssg.message, [mssg.recipient_no], enqueue=False)
+            this_resp = self.at_sms.send(mssg.message, [mssg.recipient_no], settings.AT_SENDER_ID, enqueue=False)
+            # this_resp = self.at_sms.send(mssg.message, [mssg.recipient_no], enqueue=False)
             # print(this_resp)
             if len(this_resp['SMSMessageData']['Recipients']) == 0:
                 # print(mssg)
