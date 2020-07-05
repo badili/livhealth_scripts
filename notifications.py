@@ -23,17 +23,26 @@ from jinja2 import Template, FileSystemLoader
 from jinja2.environment import Environment
 
 try:
-    # try importing stuff from LivHealth
-    from .terminal_output import Terminal
-    from .models import SMSQueue, MessageTemplates, Recipients, Campaign, SubCounty, Ward, Village
-    from .serializers import RecepientSerializer
-    from .odk_forms import OdkForms
-    from .odk_choices_parser import ImportODKChoices
-except:
-    # try importing stuff from PazuriPoultry
-    from vendor.terminal_output import Terminal
-    from .models import SMSQueue, MessageTemplates, Personnel, Campaign, Farm, SubscriptionPayment, Batch, Production, EventsSchedule, EventsList, OtherEvents, Farm, IncomeExpense, PERSONNEL_DESIGNATION_CHOICES
-    from .common_tasks import Emails
+    if re.match('.+LivHealth', settings.SITE_NAME):
+        # try importing stuff from LivHealth
+        from .terminal_output import Terminal
+        from .models import SMSQueue, MessageTemplates, Recipients, Campaign, SubCounty, Ward, Village
+        from .serializers import RecepientSerializer
+        from .odk_forms import OdkForms
+        from .odk_choices_parser import ImportODKChoices
+    elif settings.SITE_NAME == 'Pazuri Records':
+        # try importing stuff from PazuriPoultry
+        from vendor.terminal_output import Terminal
+        from .models import SMSQueue, MessageTemplates, Personnel, Campaign, Farm, SubscriptionPayment, Batch, Production, EventsSchedule, EventsList, OtherEvents, Farm, IncomeExpense, PERSONNEL_DESIGNATION_CHOICES
+        from .common_tasks import Emails
+    elif settings.SITE_NAME == 'BoxGirls M&E Records':
+        # import from BoxGirls
+        from vendor.terminal_output import Terminal
+    else:
+        from vendor.terminal_output import Terminal
+except Exception as e:
+    raise
+
 
 terminal = Terminal()
 sentry = Client(settings.SENTRY_DSN)
