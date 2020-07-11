@@ -38,6 +38,8 @@ try:
     elif settings.SITE_NAME == 'BoxGirls M&E Records':
         # import from BoxGirls
         from vendor.terminal_output import Terminal
+    elif settings.SITE_NAME == 'Church Register':
+        from .terminal_output import Terminal
     else:
         from vendor.terminal_output import Terminal
 except Exception as e:
@@ -1326,3 +1328,32 @@ class PazuriNotification():
             return a[1]
         else:
             batch_id.capitalize()
+
+
+class BoxGirlsNotification():
+    def __init__(self, cur_user_email=None):
+        self.time_formats = ['now', 'today', 'tomorrow', 'yesterday']
+        self.at_ok_sending_status_codes = [100, 101, 102]
+        if settings.AT_SENDER_ID is None:
+            settings.AT_SENDER_ID = 'Pazuri'
+
+    def periodic_processing(self, provider):
+        queue = Notification()
+
+        if provider == 'at':
+            queue.configure_at()
+        elif provider == 'nexmo':
+            queue.configure_nexmo()
+        else:
+            # configure all the providers so that they can be selected randomly
+            queue.configure_at()
+            queue.configure_nexmo()
+
+
+
+class ChurchRegisterNotification():
+    def __init__(self, cur_user_email=None):
+        self.time_formats = ['now', 'today', 'tomorrow', 'yesterday']
+        self.at_ok_sending_status_codes = [100, 101, 102]
+        if settings.AT_SENDER_ID is None:
+            settings.AT_SENDER_ID = 'Pazuri'
