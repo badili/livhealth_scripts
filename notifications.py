@@ -40,6 +40,7 @@ try:
         from vendor.terminal_output import Terminal
     elif settings.SITE_NAME == 'Church Register':
         from .terminal_output import Terminal
+        from .common_tasks import Emails
     else:
         from vendor.terminal_output import Terminal
 except Exception as e:
@@ -1350,10 +1351,11 @@ class BoxGirlsNotification():
             queue.configure_nexmo()
 
 
-
 class ChurchRegisterNotification():
     def __init__(self, cur_user_email=None):
         self.time_formats = ['now', 'today', 'tomorrow', 'yesterday']
         self.at_ok_sending_status_codes = [100, 101, 102]
         if settings.AT_SENDER_ID is None:
-            settings.AT_SENDER_ID = 'Pazuri'
+            settings.AT_SENDER_ID = 'ChurchReg'
+
+
