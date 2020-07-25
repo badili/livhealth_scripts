@@ -316,7 +316,7 @@ class Notification():
                     # we have a testing message, don't send it
                     continue
                 # print('%s: %s - %s' % (sched_sms.id, sched_sms.schedule_time, sched_sms.recipient_no))
-                print('Seconds Diff\n````````````\n%.1f -- %d\n--\n' % ((cur_time - sched_sms.schedule_time).total_seconds(), settings.MESSAGE_VALIDITY * 60 * 60))
+                print('Seconds Diff -- %s\n````````````\n%.1f -- %d\n--\n' % (cur_time_str, (cur_time - sched_sms.schedule_time).total_seconds(), settings.MESSAGE_VALIDITY * 60 * 60))
                 if (cur_time - sched_sms.schedule_time).total_seconds() > settings.MESSAGE_VALIDITY * 60 * 60:
                     if settings.DEBUG: print('The message is expired...')
                     sentry.captureMessage("Expired message to %s: '%s'" % (sched_sms.recipient_no, sched_sms.message), level='warning', extra={'cur_time': cur_time_str, 'scheduled_time': sched_sms.schedule_time.strftime('%Y-%m-%d %H:%M:%S'), 'message_validity': '%d Sec' % settings.MESSAGE_VALIDITY * 60 * 60})
