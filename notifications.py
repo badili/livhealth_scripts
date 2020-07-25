@@ -316,7 +316,7 @@ class Notification():
                     # we have a testing message, don't send it
                     continue
                 # print('%s: %s - %s' % (sched_sms.id, sched_sms.schedule_time, sched_sms.recipient_no))
-                print('Seconds Diff -- %s\n````````````\n%.1f -- %d\n--\n' % (cur_time_str, (cur_time - sched_sms.schedule_time).total_seconds(), settings.MESSAGE_VALIDITY * 60 * 60))
+                print('Seconds Diff\nCur Time = %s, Sched Time = %s\n````````````\n%.1f -- %d\n--\n' % (cur_time_str, sched_sms.schedule_time, (cur_time - sched_sms.schedule_time).total_seconds(), settings.MESSAGE_VALIDITY * 60 * 60))
                 if (cur_time - sched_sms.schedule_time).total_seconds() > settings.MESSAGE_VALIDITY * 60 * 60:
                     if settings.DEBUG: print('The message is expired...')
                     sentry.captureMessage("Expired message to %s: '%s'" % (sched_sms.recipient_no, sched_sms.message), level='warning', extra={'cur_time': cur_time_str, 'scheduled_time': sched_sms.schedule_time.strftime('%Y-%m-%d %H:%M:%S'), 'message_validity': '%d Sec' % settings.MESSAGE_VALIDITY * 60 * 60})
@@ -369,16 +369,17 @@ class Notification():
             # print(this_resp)
             if len(this_resp['SMSMessageData']['Recipients']) == 0:
                 # print(mssg)
-                raise Exception(this_resp['SMSMessageData']['Message'])
-            if this_resp['SMSMessageData']['Recipients'][0]['statusCode'] in self.at_ok_sending_status_codes:
+                sentry.captureMessage("Message not sent.", level='info', extra={'sample_data': this_resp})
+                # raise Exception(this_resp['SMSMessageData']['Message'])
+            elif this_resp['SMSMessageData']['Recipients'][0]['statusCode'] in self.at_ok_sending_status_codes:
                 # if the message is processed well, add the results to the db
                 mssg.in_queue = 0
                 mssg.queue_time = cur_time
                 mssg.provider_id = this_resp['SMSMessageData']['Recipients'][0]['messageId']
 
-            mssg.msg_status = settings.AT_STATUS_CODES[this_resp['SMSMessageData']['Recipients'][0]['statusCode']]
-            mssg.full_clean()
-            mssg.save()
+                mssg.msg_status = settings.AT_STATUS_CODES[this_resp['SMSMessageData']['Recipients'][0]['statusCode']]
+                mssg.full_clean()
+                mssg.save()
         except Exception as e:
             if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
