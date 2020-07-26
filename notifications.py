@@ -58,8 +58,6 @@ class Notification():
     def __init__(self):
         self.time_formats = ['now', 'today', 'tomorrow', 'yesterday']
         self.at_ok_sending_status_codes = [100, 101, 102]
-        if settings.AT_SENDER_ID is None:
-            settings.AT_SENDER_ID = 'LivHealth'
 
         try:
             # email environment
@@ -818,8 +816,6 @@ class PazuriNotification():
     def __init__(self, cur_user_email=None):
         self.time_formats = ['now', 'today', 'tomorrow', 'yesterday']
         self.at_ok_sending_status_codes = [100, 101, 102]
-        if settings.AT_SENDER_ID is None:
-            settings.AT_SENDER_ID = 'Pazuri'
 
         try:
             if cur_user_email is not None:
@@ -1336,8 +1332,6 @@ class BoxGirlsNotification():
     def __init__(self, cur_user_email=None):
         self.time_formats = ['now', 'today', 'tomorrow', 'yesterday']
         self.at_ok_sending_status_codes = [100, 101, 102]
-        if settings.AT_SENDER_ID is None:
-            settings.AT_SENDER_ID = 'Pazuri'
 
     def periodic_processing(self, provider):
         queue = Notification()
@@ -1356,7 +1350,5 @@ class ChurchRegisterNotification():
     def __init__(self, cur_user_email=None):
         self.time_formats = ['now', 'today', 'tomorrow', 'yesterday']
         self.at_ok_sending_status_codes = [100, 101, 102]
-        if settings.AT_SENDER_ID is None:
-            settings.AT_SENDER_ID = 'ChurchReg'
 
 
