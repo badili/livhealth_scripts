@@ -364,12 +364,15 @@ class Notification():
             cur_time = cur_time.strftime('%Y-%m-%d %H:%M:%S')
             # lets send the messages synchronously... should be changed to async
             # How does AT identify a message when a callback is given
-            this_resp = self.at_sms.send(mssg.message, [mssg.recipient_no], settings.AT_SENDER_ID, enqueue=False)
-            # this_resp = self.at_sms.send(mssg.message, [mssg.recipient_no], enqueue=False)
+            if settings.AT_SENDER_ID is None:
+                this_resp = self.at_sms.send(mssg.message, [mssg.recipient_no], enqueue=False)
+            else:
+                this_resp = self.at_sms.send(mssg.message, [mssg.recipient_no], settings.AT_SENDER_ID, enqueue=False)
+
             # print(this_resp)
             if len(this_resp['SMSMessageData']['Recipients']) == 0:
                 # print(mssg)
-                sentry.captureMessage("Message not sent.", level='info', extra={'sample_data': this_resp})
+                sentry.captureMessage("Message not sent.", level='info', extra={'at_response': this_resp, 'message': mssg})
                 # raise Exception(this_resp['SMSMessageData']['Message'])
             elif this_resp['SMSMessageData']['Recipients'][0]['statusCode'] in self.at_ok_sending_status_codes:
                 # if the message is processed well, add the results to the db
