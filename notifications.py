@@ -1283,7 +1283,7 @@ class PazuriNotification():
             elif len(all_deaths) == 1:
                 deaths_narrative = "%d Deaths (%s)" % (all_deaths[0]['total_deaths'], all_deaths[0]['batch__batch_id'].capitalize())
             else:
-                narrative = ', '.join(["%d Deaths (%s)" % (ep['batch__batch_id'].capitalize(), ep['total_deaths']) for ep in all_deaths])
+                narrative = ', '.join(["%d Deaths (%s)" % (ep['total_deaths'], ep['batch__batch_id'].capitalize()) for ep in all_deaths])
                 a = [ep['total_deaths'] for ep in all_deaths]
                 total_deaths = sum(map(lambda x:x,a))
                 deaths_narrative = "%d Deaths (%s)" % (total_deaths, narrative)
