@@ -1086,6 +1086,9 @@ class PazuriNotification():
                     farm_batches = Batch.objects.filter(farm_id=farm.id, exit_date=None).exclude(batch_id__icontains='general').all()
 
                     for template in templates:
+                        # now the message
+                        main_message = ''
+                        
                         # check if this template should be send now...
                         parts = template.sending_time.strftime('%H:%M:%S').split(':')
                         sending_time = cur_time.replace(hour=int(parts[0]), minute=int(parts[1]), second=int(parts[2]))
@@ -1108,9 +1111,7 @@ class PazuriNotification():
                                                 missing_records[cur_record] = []
 
                                             missing_records[cur_record].append(batch_name)
-
-                                # now the message
-                                main_message = ''
+                                
                                 for record_name, batches in missing_records.items():
                                     if len(farm_batches) == len(batches):
                                         # we are missing data for all the necessary batches
@@ -1120,13 +1121,13 @@ class PazuriNotification():
 
                                 if main_message != '': main_message = main_message + "\n- Any other record"
 
-                                # if we have nothing to say, just keep quiet
-                                if main_message == '': continue
-
                                 # check if there is a scheduled event for tomorrow
                                 kesho_events_narrative = self.scheduled_events(farm.id, kesho)
                                 if kesho_events_narrative != '':
                                     main_message = kesho_events_narrative if main_message == '' else main_message + "\n\n" + kesho_events_narrative
+                                
+                                # if we have nothing to say, just keep quiet
+                                if main_message == '': continue
 
                                 # ensure that we have someone to send this message to
                                 if len(recipients) == 0:
@@ -1189,6 +1190,7 @@ class PazuriNotification():
 
         records = {}
         today = datetime.datetime.now()
+        kesho = date.today() + datetime.timedelta(days=1)
         batches = Batch.objects.filter(farm_id=farm_id, exit_date=None).exclude(batch_id__icontains='general').all()
         for batch in batches:
             cur_batch_name = self.format_batch_name(batch.batch_id, batch.batch_name)
