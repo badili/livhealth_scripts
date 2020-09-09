@@ -35,9 +35,9 @@ try:
         from vendor.terminal_output import Terminal
         from .models import SMSQueue, MessageTemplates, Personnel, Campaign, Farm, SubscriptionPayment, Batch, Production, EventsSchedule, EventsList, OtherEvents, Farm, IncomeExpense, PERSONNEL_DESIGNATION_CHOICES
         from .common_tasks import Emails
-    elif settings.SITE_NAME == 'BoxGirls M&E Records':
-        # import from BoxGirls
+    elif settings.SITE_NAME == 'BoxGirls M&E System':
         from vendor.terminal_output import Terminal
+        from .common_tasks import Emails
     elif settings.SITE_NAME == 'Church Register':
         from .terminal_output import Terminal
         from .common_tasks import Emails
@@ -69,7 +69,10 @@ class Notification():
         self.env.loader = FileSystemLoader(settings.TEMPLATES[0]['DIRS'][0])
 
         # testing messages
-        self.testing_numbers = ['%s%s' % (settings.TESTING_PREFIX, x) for x in range(settings.TESTING_PHONE_NUMBERS_START, settings.TESTING_PHONE_NUMBERS_END)]
+        if hasattr(settings, 'TESTING_PREFIX'):
+            self.testing_numbers = ['%s%s' % (settings.TESTING_PREFIX, x) for x in range(settings.TESTING_PHONE_NUMBERS_START, settings.TESTING_PHONE_NUMBERS_END)]
+        else:
+            self.testing_numbers = []
 
     def process_test_data(self, input_file):
         """Given an input file, imports the data to the DB
