@@ -41,6 +41,10 @@ try:
     elif settings.SITE_NAME == 'Church Register':
         from .terminal_output import Terminal
         from .common_tasks import Emails
+    elif settings.SITE_NAME == 'Co-Infection Data Hub':
+        from vendor.terminal_output import Terminal
+        from vendor.common_tasks import Emails
+        
     else:
         from vendor.terminal_output import Terminal
 except Exception as e:
