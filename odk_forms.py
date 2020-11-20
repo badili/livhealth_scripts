@@ -2610,20 +2610,31 @@ def process_abattoir_records_v1(form_ids):
                         sh_specie.publish()
 
                         # now lets save the body parts
-                        for b_part in specie['s2q10_rpt_body_part']:
-                            all_lesions = b_part['s2q15_lesions'].split()
-                            for lesion in all_lesions:
-                                sh_part = SHParts(
-                                    sh_specie=sh_specie,
-                                    body_part=b_part['s2q12_cur_body_part_label'],
-                                    lesions=lesion,
-                                    no_condemned=b_part['s2q14_no_condemned'],
-                                    sample_collected=False if specie['s2q16_samples'] == 'no' else True
-                                )
-                                sh_part.publish()
+                        if specie['s2q10_rpt_body_part_count'] != 0:
+                            for b_part in specie['s2q10_rpt_body_part']:
+                                all_lesions = b_part['s2q15_lesions'].split()
+                                for lesion in all_lesions:
+                                    sh_part = SHParts(
+                                        sh_specie=sh_specie,
+                                        body_part=b_part['s2q12_cur_body_part_label'],
+                                        lesions=lesion,
+                                        no_condemned=b_part['s2q14_no_condemned'],
+                                        sample_collected=False if specie['s2q16_samples'] == 'no' else True
+                                    )
+                                    sh_part.publish()
+                        elif specie['s2q8_no_slaughtered'] == specie['s2q8_no_condemned']:
+                            # we condemned a whole carcass
+                            sh_part = SHParts(
+                                sh_specie=sh_specie,
+                                body_part='Whole Carcass',
+                                lesions='Not Specified',
+                                no_condemned=b_part['s2q8_no_condemned'],
+                                sample_collected=False if specie['s2q16_samples'] == 'no' else True
+                            )
+                            sh_part.publish()
 
     except Exception as e:
-        terminal.tprint(str(e), 'fail')
+        if settings.DEBUG: terminal.tprint(str(e), 'fail')
         logger.error(traceback.format_exc())
         # terminal.tprint(json.dumps(subm), 'fail')
         sentry.captureException()
