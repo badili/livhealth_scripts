@@ -81,6 +81,10 @@ def landing_page(request):
     return render(request, 'landing.html')
 
 
+def privacy_policy(request):
+    return render(request, 'privacy_policy.html')
+
+
 @login_required(login_url='/login')
 def download_page(request):
     csrf_token = get_or_create_csrf_token(request)

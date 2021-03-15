@@ -40,6 +40,7 @@ urlpatterns = [
     url(r'^get_data/$', views.download_data, name='download_data'),
     url(r'^refresh_forms/$', views.refresh_forms, name='refresh_forms'),
     url(r'^biweekly/$', views.biweekly, name='biweekly'),
+    url(r'^privacy_policy\.html$', views.privacy_policy, name='privacy_policy'),
 
     # api urls
     url(r'^smsqueue_u$', api_views.SMSQueueView.as_view(), name='SMSQueue'),
