@@ -62,11 +62,9 @@ sentry = Client(settings.SENTRY_DSN)
 
 class OdkForms():
     def __init__(self, request=None):
-        # self.server = 'http://odk.au-ibar.org/'
-        self.server = settings.ONADATA_SETTINGS['HOST']
-        self.ona_user = settings.ONADATA_SETTINGS['USER']
-        self.ona_pass = settings.ONADATA_SETTINGS['PASSWORD']
-        self.api_token = settings.ONADATA_SETTINGS['API_TOKEN']
+
+        self.server = settings.ONADATA_URL
+        self.api_token = settings.ONADATA_TOKEN
 
         self.api_all_forms = 'api/v1/forms'
         self.form_data = 'api/v1/data/'
@@ -2169,14 +2167,18 @@ class OdkForms():
     def schedule_notification(self, template, recipient, message):
         # This function should be in the notifications module, but due to cyclic dependancies, we include it here
         try:
-            cur_time = timezone.localtime(timezone.now())
+            # if we are using PostgreSQL, there is no need to plug the timezone
+            if re.search('livhealth$', settings.SITE_NAME, re.IGNORECASE) is None: 
+                cur_time = timezone.localtime(timezone.now())
+            else:
+                cur_time = datetime.now()
             # print(message)
             queue_item = SMSQueue(
                 template=template,
                 message=message,
                 recipient=recipient,
                 # recipient_no=recipient.cell_no if recipient.cell_no else recipient.alternative_cell_no,
-                recipient_no='+254726567797' if settings.DEBUG else recipient.cell_no if recipient.cell_no else recipient.alternative_cell_no,
+                recipient_no='+254720000097' if settings.DEBUG else recipient.cell_no if recipient.cell_no else recipient.alternative_cell_no,
                 msg_status='SCHEDULED',
                 schedule_time=cur_time.strftime('%Y-%m-%d %H:%M:%S')
             )

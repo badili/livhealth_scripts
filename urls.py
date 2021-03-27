@@ -17,8 +17,11 @@ from django.conf.urls import url
 from django.contrib import admin
 from django.conf.urls import include
 
+from wkhtmltopdf.views import PDFTemplateView
+
 from livhealth_scripts import views
 from livhealth_scripts.api import views as api_views
+from livhealth_scripts import reports
 
 urlpatterns = [
     url(r'^admin/', admin.site.urls),
@@ -71,4 +74,8 @@ urlpatterns = [
     url(r'^save-campaign/$', views.save_campaign, name='save_campaign'),
     url(r'^save-template/$', views.save_template, name='save_template'),
     url(r'^save-recipient/$', views.save_recipient, name='save_recipient'),
+
+    url(r'^reports/(?P<year>20[12][0-9])(/(?P<period>jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|Q1|Q2|Q3|Q4|H1|H2))?$', reports.ReportView.as_view, name='gen_report'),
+
+    url(r'^pdf/$', PDFTemplateView.as_view(template_name='landing.html', filename=None), name='dynamic_pdf'),
 ]
