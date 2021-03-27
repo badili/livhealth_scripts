@@ -14,8 +14,9 @@ from django.db import transaction
 from django.db.models import Q, Sum, Count, IntegerField, Min, Max, Avg, F
 from django.conf import settings
 from django.utils import timezone
+from django.views.generic import TemplateView
 
-from wkhtmltopdf.views import PDFTemplateView
+from wkhtmltopdf.views import PDFTemplateResponse, PDFTemplateView
 from hashids import Hashids
 from botocore.errorfactory import ClientError
 
@@ -28,52 +29,150 @@ sentry_sdk.init(settings.SENTRY_DSN, environment=settings.ENV_ROLE)
 my_hashids = Hashids(min_length=5, salt=settings.SECRET_KEY)
 
 
-class ReportView(PDFTemplateView):
-    filename = 'my_pdf.pdf'
-    template_name = 'my_template.html'
-    cmd_options = {
-        'margin-top': 3,
-    }
+def report_wrapper(request, hashid):
+    try:
+        grapher = GraphsGenerator()
+        report_details = grapher.report_details(hashid)
+        
+        filename_ = '%s for %s.pdf' % (report_details['title'], report_details['period'])
+        template_name_ = 'reports/monthly_report.html'
+        header_template_ = 'reports/header.html'
+        footer_template_ = 'reports/footer.html'
+        cmd_options_ = { 'margin-top': 3, 'disable-smart-shrinking': True }
+
+        report_vars = {
+            'report_title': '%s %s' % (report_details['title'], report_details['period']),
+            'report_period': 'January',
+            'details': report_details
+        }
+
+    except Exception as e:
+        if settings.DEBUG: terminal.tprint(str(e), 'fail')
+        sentry_sdk.capture_exception(e)
+        raise Exception('There was an error while fetching the report')
+
+
+
+    class ReportView(PDFTemplateView):
+        filename = filename_
+        template_name = template_name_
+
+        def get_context_data(self, **kwargs):
+            context = super(ReportView, self).get_context_data(**kwargs)
+            context = {**context, **report_vars}
+
+            return context
+        
+        
+    return ReportView.as_view()(request)
+    # request=request, filename=filename_, cmd_options={'disable-javascript': False}, template_name=template_name_, context=context
+    # context = RequestContext(request)    
+    # return PDFTemplateView.as_view()(request=request, template_name=template_name_)
 
 
 class GraphsGenerator():
-    # initialize the time periods we are dealing with
+    # the graphs that we are going to generate
+    graph_names = ['reports']
+
+    """
+        graph periods coding
+
+        0 - get the full year
+        1-12  for jan to dec
+        13-16 for q1 to q4
+        17 for half 1
+        18 for half 2
+    """
     t_period = {
         'fm': {'name': 'Month'}, 'fq': {'name': 'Quarter'}, 'fh': {'name': 'Half Year'}, 'fy': {'name': 'Year'}
     }
 
     def __init__(self):
-        try:
-            print('Initialising the graph generator class')
+        print('Silence is golden')
 
+    def report_details(self, hashid):
+        """
+            the coded hashid contains the year and the period of the report
+            the period is 0-18 according to the period coding
+        """
+
+        decoded = my_hashids.decode(hashid)
+        
+        g_year = decoded[0]
+        g_period = decoded[1] if len(decoded) == 2 else None
+
+        report_details = {
+            'graphs': {},
+            'title': '%s LivHealth Disease Surveillance Report' % settings.COUNTY_NAME,
+            'period_year': g_year,
+            'total_reports': 'xx',
+            'leading_subcounty': 'sub county',
+            'highest_no_reports': 'yy'
+        }
+
+        if g_period == 0:
+            report_period = 'Year'
+            report_details['period_type'] = 'year'
+
+        elif g_period < 13:
+            report_period = dt.date(g_year, g_period, 1).strftime("%B")
+            report_details['period_type'] = 'Month'
+
+        elif g_period < 17:
+            report_period = 'Quarter %d,' % (g_period - 12)
+            report_details['period_type'] = 'Quarter'
+
+        else:
+            report_period = '%d Half of ' % (g_period - 16)
+            report_details['period_type'] = 'Half Year'
+        
+
+        for r_type in self.graph_names:
+            report_details['graphs'][r_type] = "%s/reports/%s_%s_%d_%d.jpg" % (settings.STATIC_URL, settings.PROJECT_NAME, r_type, g_year, g_period )
+
+        report_details['period'] = '%s %s' % (report_period, g_year)
+        report_details['period_name'] = report_period
+
+
+        return report_details
+
+    def determine_graphs_period(self, report_date = None):
+        try:
             # when called, determine the period to use in generating the graphs
-            today_ = dt.datetime.now()
+            
+            if report_date is None: report_date = dt.datetime.now()
 
             # get the interested complete month
-            self.t_period['fm']['year'] = today_.year if today_.month > 0 else today_.year - 1
-            self.t_period['fm']['no'] = 12 if today_.month == 1 else today_.month-1
+            self.t_period['fm']['year'] = report_date.year if report_date.month > 0 else report_date.year - 1
+            self.t_period['fm']['no'] = 12 if report_date.month == 1 else report_date.month-1
             self.t_period['fm']['start'] = dt.date(self.t_period['fm']['year'], self.t_period['fm']['no'], 1)
             self.t_period['fm']['end'] = self.t_period['fm']['start']+relativedelta(months=1, days=-1)
+            self.t_period['fm']['gid'] = self.t_period['fm']['no']
 
             # get the interested complete quarter
-            curr_quarter = 1+(today_.month-1)//3
-            self.t_period['fq']['year'] = today_.year if curr_quarter > 1 else today_.year - 1
+            curr_quarter = 1+(report_date.month-1)//3
+            self.t_period['fq']['year'] = report_date.year if curr_quarter > 1 else report_date.year - 1
             self.t_period['fq']['no'] = 4 if curr_quarter == 1 else curr_quarter - 1
             self.t_period['fq']['start'] = dt.date(self.t_period['fq']['year'], 1+3*(self.t_period['fq']['no']-1), 1)
             self.t_period['fq']['end'] = self.t_period['fq']['start'] + relativedelta(months=3, days=-1)
+            self.t_period['fq']['gid'] = self.t_period['fq']['no'] + 12
 
             # get the interested complete half year
-            curr_half = 1+(today_.month-1)//6
-            self.t_period['fh']['year'] = today_.year if curr_half > 1 else today_.year - 1
+            curr_half = 1+(report_date.month-1)//6
+            self.t_period['fh']['year'] = report_date.year if curr_half > 1 else report_date.year - 1
             self.t_period['fh']['no'] = 2 if curr_half == 1 else curr_half - 1
             self.t_period['fh']['start'] = dt.date(self.t_period['fh']['year'], 1+6*(self.t_period['fh']['no']-1), 1)
             self.t_period['fh']['end'] = self.t_period['fh']['start']+relativedelta(months=6, days=-1)
+            self.t_period['fh']['gid'] = self.t_period['fh']['no'] + 16
 
             # get the previous year
-            self.t_period['fy']['year'] = today_.year - 1
+            self.t_period['fy']['year'] = report_date.year - 1
             self.t_period['fy']['no'] = ''
             self.t_period['fy']['start'] = dt.date(self.t_period['fy']['year'], 1, 1)
             self.t_period['fy']['end'] = dt.date(self.t_period['fy']['year'], 12, 31)
+            self.t_period['fy']['gid'] = 0
+
+            print(self.t_period)
 
         except Exception as e:
             if settings.DEBUG: terminal.tprint(str(e), 'fail')
@@ -83,28 +182,29 @@ class GraphsGenerator():
     def generate_graphs(self):
         try:
             for key_, period_ in self.t_period.items():
-                file_name_path = "reports/%s_%s%s.jpg" % (settings.PROJECT_NAME, period_['year'], '' if key_ == 'fy' else '_%s%d' % (key_, period_['no']) )
-                
-                try:
-                    if settings.USE_S3 == 'True':
-                        s3 = boto3.client('s3')
-                        s3.head_object(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=file_name_path)
-                    else:
-                        if not os.path.exists("%s/%s" % (settings.MEDIA_ROOT, file_name_path)): raise Exception('The file %s is missing' % file_name_path)
+                for r_type in self.graph_names:
+                    file_name_path = "reports/%s_%s_%d_%d.jpg" % (settings.PROJECT_NAME, r_type, period_['year'], period_['gid'] )
+                    
+                    try:
+                        if settings.USE_S3 == 'True':
+                            s3 = boto3.client('s3')
+                            s3.head_object(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key=file_name_path)
+                        else:
+                            if not os.path.exists("%s/%s" % (settings.STATIC_ROOT, file_name_path)): raise Exception('The file %s is missing' % file_name_path)
 
-                except:
-                    # Not found
-                    print('\nGenerate the report for %s%s' % (period_['year'], '' if key_ == 'fy' else '_%s%d' % (key_, period_['no'])) )
-                    self.fetch_reports_data(period_, file_name_path)
+                    except:
+                        # Not found
+                        print("\nGenerate the '%s' report for %s%s" % (r_type, period_['year'], '' if key_ == 'fy' else '_%s%d' % (key_, period_['no'])) )
+                        self.fetch_graph_reports(period_, file_name_path)
 
         except Exception as e:
             if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry_sdk.capture_exception(e)
             raise Exception('There was an error while generating the graphs')
 
-    def fetch_reports_data(self, period_, file_name_path):
+    def fetch_graph_reports(self, period_, file_name_path):
         """
-        Given a period with a start date and end date, fetch and format data for this period
+            Fetch, analyse and graph data for the received reports
         """
 
         rp_df = pd.DataFrame()
@@ -171,7 +271,7 @@ class GraphsGenerator():
             img.save(img_name)
             client.upload_file(img_name, settings.AWS_STORAGE_BUCKET_NAME, 'static/qr_codes/%s' % img_name, ExtraArgs={'ACL':'public-read'})
         else:
-            plt.savefig(fname="%s/%s" % (settings.MEDIA_ROOT, file_name_path))
+            plt.savefig(fname="%s/%s" % (settings.STATIC_ROOT, file_name_path))
 
         plt.close(fig)
 
@@ -179,4 +279,5 @@ class GraphsGenerator():
 def generate_report_graphs():
     grapher = GraphsGenerator()
 
+    grapher.determine_graphs_period()
     grapher.generate_graphs()
