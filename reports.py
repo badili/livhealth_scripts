@@ -6,15 +6,18 @@ import sentry_sdk
 import datetime as dt
 import numpy as np
 import pandas as pd
+import math
 import boto3
 import matplotlib.pyplot as plt
 
 from dateutil.relativedelta import relativedelta
 from django.db import transaction
 from django.db.models import Q, Sum, Count, IntegerField, Min, Max, Avg, F
+from django.db.models.expressions import RawSQL
 from django.conf import settings
 from django.utils import timezone
 from django.views.generic import TemplateView
+from calendar import monthrange
 
 from wkhtmltopdf.views import PDFTemplateResponse, PDFTemplateView
 from hashids import Hashids
@@ -35,7 +38,8 @@ def report_wrapper(request, hashid):
         report_details = grapher.report_details(hashid)
         
         filename_ = '%s for %s.pdf' % (report_details['title'], report_details['period'])
-        template_name_ = 'reports/monthly_report.html'
+        template_name_ = report_details['report_template']
+        
         header_template_ = 'reports/header.html'
         footer_template_ = 'reports/footer.html'
         cmd_options_ = { 'margin-top': 3, 'disable-smart-shrinking': True }
@@ -72,7 +76,7 @@ def report_wrapper(request, hashid):
 
 class GraphsGenerator():
     # the graphs that we are going to generate
-    graph_names = ['reports']
+    graph_names = ['reports', 'scvo_reporters', 'reports_trend']
 
     """
         graph periods coding
@@ -97,6 +101,7 @@ class GraphsGenerator():
         """
 
         decoded = my_hashids.decode(hashid)
+        # print(my_hashids.encode(2020, 0))
         
         g_year = decoded[0]
         g_period = decoded[1] if len(decoded) == 2 else None
@@ -113,18 +118,23 @@ class GraphsGenerator():
         if g_period == 0:
             report_period = 'Year'
             report_details['period_type'] = 'year'
+            report_details['report_template'] = 'reports/monthly_report.html'
+
 
         elif g_period < 13:
             report_period = dt.date(g_year, g_period, 1).strftime("%B")
             report_details['period_type'] = 'Month'
+            report_details['report_template'] = 'reports/monthly_report.html'
 
         elif g_period < 17:
             report_period = 'Quarter %d,' % (g_period - 12)
             report_details['period_type'] = 'Quarter'
+            report_details['report_template'] = 'reports/monthly_report.html'
 
         else:
             report_period = '%d Half of ' % (g_period - 16)
             report_details['period_type'] = 'Half Year'
+            report_details['report_template'] = 'reports/monthly_report.html'
         
 
         for r_type in self.graph_names:
@@ -148,6 +158,7 @@ class GraphsGenerator():
             self.t_period['fm']['start'] = dt.date(self.t_period['fm']['year'], self.t_period['fm']['no'], 1)
             self.t_period['fm']['end'] = self.t_period['fm']['start']+relativedelta(months=1, days=-1)
             self.t_period['fm']['gid'] = self.t_period['fm']['no']
+            self.t_period['fm']['period_name'] = self.t_period['fm']['start'].strftime('%B')
 
             # get the interested complete quarter
             curr_quarter = 1+(report_date.month-1)//3
@@ -156,6 +167,7 @@ class GraphsGenerator():
             self.t_period['fq']['start'] = dt.date(self.t_period['fq']['year'], 1+3*(self.t_period['fq']['no']-1), 1)
             self.t_period['fq']['end'] = self.t_period['fq']['start'] + relativedelta(months=3, days=-1)
             self.t_period['fq']['gid'] = self.t_period['fq']['no'] + 12
+            self.t_period['fq']['period_name'] = 'Quarter %d of %s' % (self.t_period['fq']['no'], self.t_period['fq']['year'])
 
             # get the interested complete half year
             curr_half = 1+(report_date.month-1)//6
@@ -164,6 +176,7 @@ class GraphsGenerator():
             self.t_period['fh']['start'] = dt.date(self.t_period['fh']['year'], 1+6*(self.t_period['fh']['no']-1), 1)
             self.t_period['fh']['end'] = self.t_period['fh']['start']+relativedelta(months=6, days=-1)
             self.t_period['fh']['gid'] = self.t_period['fh']['no'] + 16
+            self.t_period['fh']['period_name'] = '%d Half of %s' % (self.t_period['fh']['no'], self.t_period['fh']['year'])
 
             # get the previous year
             self.t_period['fy']['year'] = report_date.year - 1
@@ -171,6 +184,7 @@ class GraphsGenerator():
             self.t_period['fy']['start'] = dt.date(self.t_period['fy']['year'], 1, 1)
             self.t_period['fy']['end'] = dt.date(self.t_period['fy']['year'], 12, 31)
             self.t_period['fy']['gid'] = 0
+            self.t_period['fy']['period_name'] = self.t_period['fy']['year']
 
             print(self.t_period)
 
@@ -195,14 +209,20 @@ class GraphsGenerator():
                     except:
                         # Not found
                         print("\nGenerate the '%s' report for %s%s" % (r_type, period_['year'], '' if key_ == 'fy' else '_%s%d' % (key_, period_['no'])) )
-                        self.fetch_graph_reports(period_, file_name_path)
+                        self.fetch_graph_reports(period_, r_type, file_name_path)
 
         except Exception as e:
             if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry_sdk.capture_exception(e)
             raise Exception('There was an error while generating the graphs')
 
-    def fetch_graph_reports(self, period_, file_name_path):
+    def fetch_graph_reports(self, period_, r_type, file_name_path):
+
+        if r_type == 'reports': self.fetch_graph_received_reports(period_, file_name_path)
+        elif r_type == 'scvo_reporters': self.fetch_graph_scvo_reporters(period_, file_name_path)
+        elif r_type == 'reports_trend': self.fetch_graph_reports_trend(period_, file_name_path)
+
+    def fetch_graph_received_reports(self, period_, file_name_path):
         """
             Fetch, analyse and graph data for the received reports
         """
@@ -275,6 +295,119 @@ class GraphsGenerator():
 
         plt.close(fig)
 
+    def fetch_graph_scvo_reporters(self, period_, file_name_path):
+        # fetch and graph data on number of reports per sub county vets
+        # This report is critical for morale building, but the data is not yet extracted and saved in the database
+        print()
+
+    def fetch_graph_reports_trend(self, period_, file_name_path):
+        # fetch and graph data on the trend of received reports
+
+        rp_df = pd.DataFrame()
+        # determine the number items that we are expecting
+        grp_periods = []
+
+        # number of syndromic records per sub county
+        if period_['gid'] == 0:
+            si = SyndromicIncidences.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).annotate(grp_period=RawSQL('EXTRACT(MONTH FROM datetime_reported)', []) ).values('grp_period').annotate(no_reports=Count('grp_period')).order_by('grp_period')
+            grp_periods.extend(range(1, 13))
+            grp_periods_name = 'Months'
+
+        elif period_['gid'] < 13:
+            si = SyndromicIncidences.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).annotate(grp_period=RawSQL('DATE(datetime_reported)', []) ).values('grp_period').annotate(no_reports=Count('grp_period')).order_by('grp_period')
+            dates_ = []
+            dates_.extend(range(1, monthrange(period_['year'], period_['gid'])[1] + 1))
+            grp_periods = [dt.datetime(2020, 2, x).strftime('%d') for x in dates_]
+            grp_periods_name = 'Dates'
+        else:
+            si = SyndromicIncidences.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).annotate(grp_period=RawSQL('EXTRACT(WEEK FROM datetime_reported)', []) ).values('grp_period').annotate(no_reports=Count('grp_period')).order_by('grp_period')
+            grp_periods_name = 'Week Nos'
+
+            # get the weeks in this range
+            no_wks = math.ceil((period_['end'] - period_['start']) / dt.timedelta(weeks=1))
+            start_wk = period_['start'].isocalendar().week
+            grp_periods.extend(range(start_wk, start_wk + no_wks + 1))
+
+        si_df = pd.DataFrame(list(si))
+        rp_df['grp_periods'] = grp_periods
+        rp_df.set_index('grp_periods')
+
+        if not si_df.empty:
+            recs = si_df.set_index('grp_period').T.to_dict('records')[0]
+
+            # if we are processing months data, convert the datetimes to string before filling in the gaps
+            if period_['gid']!= 0 and period_['gid'] < 13:
+                recs = {date_.strftime('%d'):no_recs for date_, no_recs in recs.items()}
+
+            rp_df['syndromics'] = [recs[cp] if cp in recs.keys() else 0 for cp in grp_periods]
+        
+        else: rp_df['syndromics'] = [0]* len(grp_periods)
+
+
+        
+        # notifiable records records per sub county
+        if period_['gid'] == 0:
+            nddetail = NDDetail.objects.select_related('nd_report').filter(nd_report__datetime_reported__gte=period_['start']).filter(nd_report__datetime_reported__lte=period_['end']).annotate(grp_period=RawSQL('EXTRACT(MONTH FROM datetime_reported)', []) ).values('grp_period').annotate(no_reports=Count('grp_period')).order_by('grp_period')
+        elif period_['gid'] < 13:
+            nddetail = NDDetail.objects.select_related('nd_report').filter(nd_report__datetime_reported__gte=period_['start']).filter(nd_report__datetime_reported__lte=period_['end']).annotate(grp_period=RawSQL('DATE(datetime_reported)', []) ).values('grp_period').annotate(no_reports=Count('grp_period')).order_by('grp_period')
+        else:
+            nddetail = NDDetail.objects.select_related('nd_report').filter(nd_report__datetime_reported__gte=period_['start']).filter(nd_report__datetime_reported__lte=period_['end']).annotate(grp_period=RawSQL('EXTRACT(WEEK FROM datetime_reported)', []) ).values('grp_period').annotate(no_reports=Count('grp_period')).order_by('grp_period')
+
+        ndr_df = pd.DataFrame(list( nddetail ))
+        if not ndr_df.empty:
+            recs = ndr_df.set_index('grp_period').T.to_dict('records')[0]
+
+            # if we are processing months data, convert the datetimes to string before filling in the gaps
+            if period_['gid']!= 0 and period_['gid'] < 13:
+                recs = {date_.strftime('%d'):no_recs for date_, no_recs in recs.items()}
+
+            rp_df['nd1'] = [recs[cp] if cp in recs.keys() else 0 for cp in grp_periods]
+        
+        else: rp_df['nd1'] = [0]* len(grp_periods)
+
+        # zero reports per sub county
+        if period_['gid'] == 0:
+            zeros = NDReport.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).filter(nddetail=None).values('sub_county').annotate(grp_period=RawSQL('EXTRACT(MONTH FROM datetime_reported)', []) ).values('grp_period').annotate(no_reports=Count('grp_period')).order_by('grp_period')
+        elif period_['gid'] < 13:
+            zeros = NDReport.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).filter(nddetail=None).values('sub_county').annotate(grp_period=RawSQL('DATE(datetime_reported)', []) ).values('grp_period').annotate(no_reports=Count('grp_period')).order_by('grp_period')
+        else:
+            zeros = NDReport.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).filter(nddetail=None).values('sub_county').annotate(grp_period=RawSQL('EXTRACT(WEEK FROM datetime_reported)', []) ).values('grp_period').annotate(no_reports=Count('grp_period')).order_by('grp_period')
+
+        zeros_df = pd.DataFrame(list( zeros ))
+        if not zeros_df.empty:
+            recs = zeros_df.set_index('grp_period').T.to_dict('records')[0]
+            
+            # if we are processing months data, convert the datetimes to string before filling in the gaps
+            if period_['gid']!= 0 and period_['gid'] < 13:
+                recs = {date_.strftime('%d'):no_recs for date_, no_recs in recs.items()}
+
+            rp_df['zero'] = [recs[cp] if cp in recs.keys() else 0 for cp in grp_periods]
+            
+        else: rp_df['zero'] = [0]* len(grp_periods)
+
+        rp_df['total'] = rp_df.syndromics + rp_df.nd1 + rp_df.zero
+        
+        data_cols = ['syndromics', 'nd1', 'zero']
+        data_labels = ['Syndromic Records', 'Notifiable Diseases', 'Zero Reports']
+
+        # plot the line graph
+        plt.plot(grp_periods, rp_df['total'])
+        plt.title('Reporting trend for %s' % period_['period_name'], fontsize=14)
+        plt.xlabel(grp_periods_name, fontsize=12)
+        plt.ylabel('No of Reports', fontsize=12)
+        plt.xlim(auto=True)
+        plt.grid(True)
+
+        if settings.USE_S3 == 'True':
+            # push it to s3
+            client = boto3.client('s3', region_name=settings.AWS_S3_REGION_NAME)
+            img_name = '%s.png' % access_code
+            img.save(img_name)
+            client.upload_file(img_name, settings.AWS_STORAGE_BUCKET_NAME, 'static/qr_codes/%s' % img_name, ExtraArgs={'ACL':'public-read'})
+        else:
+            plt.savefig(fname="%s/%s" % (settings.STATIC_ROOT, file_name_path))
+
+        plt.close()
 
 def generate_report_graphs():
     grapher = GraphsGenerator()
