@@ -9,6 +9,7 @@ import pandas as pd
 import math
 import boto3
 import matplotlib.pyplot as plt
+import re
 
 from dateutil.relativedelta import relativedelta
 from django.db import transaction
@@ -23,7 +24,7 @@ from wkhtmltopdf.views import PDFTemplateResponse, PDFTemplateView
 from hashids import Hashids
 from botocore.errorfactory import ClientError
 
-from .models import SyndromicIncidences, SyndromicDetails, NDReport, NDDetail, SHReport, SHSpecies, SHParts, AGReport, AGDetail
+from .models import SyndromicIncidences, SyndromicDetails, NDReport, NDDetail, SHReport, SHSpecies, SHParts, AGReport, AGDetail, DictionaryItems
 
 from .terminal_output import Terminal
 
@@ -76,7 +77,7 @@ def report_wrapper(request, hashid):
 
 class GraphsGenerator():
     # the graphs that we are going to generate
-    graph_names = ['reports', 'scvo_reporters', 'reports_trend']
+    graph_names = ['reports', 'scvo_reporters', 'reports_trend', 'cdr_reporters', 'disease_distibution']
 
     """
         graph periods coding
@@ -115,36 +116,66 @@ class GraphsGenerator():
             'highest_no_reports': 'yy'
         }
 
+        period_code = None
         if g_period == 0:
             report_period = 'Year'
             report_details['period_type'] = 'year'
             report_details['report_template'] = 'reports/monthly_report.html'
-
+            report_details['first_date'] = dt.date(g_year, 1, 1)
+            period_code = 'fy'
 
         elif g_period < 13:
             report_period = dt.date(g_year, g_period, 1).strftime("%B")
             report_details['period_type'] = 'Month'
             report_details['report_template'] = 'reports/monthly_report.html'
+            report_details['first_date'] = dt.date(g_year, g_period, 1)
+            period_code = 'fm'
 
         elif g_period < 17:
             report_period = 'Quarter %d,' % (g_period - 12)
             report_details['period_type'] = 'Quarter'
             report_details['report_template'] = 'reports/monthly_report.html'
+            report_details['first_date'] = dt.date(g_year, ((g_period -12) * 3) - 2, 1)
+            period_code = 'fq'
 
         else:
             report_period = '%d Half of ' % (g_period - 16)
             report_details['period_type'] = 'Half Year'
             report_details['report_template'] = 'reports/monthly_report.html'
+            report_details['first_date'] = dt.date(g_year, ((g_period - 16) * 6) - 5, 1)
+            period_code = 'fh'
+
+        report_details['extra_info'] = {}
+        # get the period date details
+        self.determine_graphs_period(report_details['first_date'])
+        period_ = self.t_period[period_code]
+        self.report_extra_details(period_)
         
-
         for r_type in self.graph_names:
-            report_details['graphs'][r_type] = "%s/reports/%s_%s_%d_%d.jpg" % (settings.STATIC_URL, settings.PROJECT_NAME, r_type, g_year, g_period )
+            if r_type == 'disease_distibution':
+                # we have multiple graphs here
+                all_species = list(SyndromicDetails.objects.select_related('incidence').filter(incidence__datetime_reported__gte=period_['start']).filter(incidence__datetime_reported__lte=period_['end']).values('species').distinct('species'))
+                for specie in all_species:
+                    report_details['graphs']['%s_%s' % (r_type, specie['species'])] = "%sreports/%s_disease_distibution_%s_%d_%d.jpg" % (settings.STATIC_URL, settings.PROJECT_NAME, specie['species'], g_year, g_period )
 
+                report_details['extra_info']['all_species'] = all_species
+            else:
+                report_details['graphs'][r_type] = "%s/reports/%s_%s_%d_%d.jpg" % (settings.STATIC_URL, settings.PROJECT_NAME, r_type, g_year, g_period )
+
+        
         report_details['period'] = '%s %s' % (report_period, g_year)
         report_details['period_name'] = report_period
 
 
         return report_details
+
+    def report_extra_details(self, period_):
+        # get the additional details for this report
+
+        # get the species whose graphs have been generated for the disease distribution
+        to_return = {}
+
+        return to_return
 
     def determine_graphs_period(self, report_date = None):
         try:
@@ -217,10 +248,17 @@ class GraphsGenerator():
             raise Exception('There was an error while generating the graphs')
 
     def fetch_graph_reports(self, period_, r_type, file_name_path):
-
         if r_type == 'reports': self.fetch_graph_received_reports(period_, file_name_path)
         elif r_type == 'scvo_reporters': self.fetch_graph_scvo_reporters(period_, file_name_path)
         elif r_type == 'reports_trend': self.fetch_graph_reports_trend(period_, file_name_path)
+        elif r_type == 'cdr_reporters': self.fetch_graph_cdr_reporters(period_, file_name_path)
+        elif r_type == 'disease_distibution':
+            # get the species in this period
+            all_species = list(SyndromicDetails.objects.select_related('incidence').filter(incidence__datetime_reported__gte=period_['start']).filter(incidence__datetime_reported__lte=period_['end']).values('species').distinct('species'))
+            
+            for specie in all_species:
+                file_name_path = "reports/%s_disease_distibution_%s_%d_%d.jpg" % (settings.PROJECT_NAME, specie['species'], period_['year'], period_['gid'] )
+                self.fetch_graph_disease_distibution(period_, specie['species'], file_name_path)
 
     def fetch_graph_received_reports(self, period_, file_name_path):
         """
@@ -408,6 +446,96 @@ class GraphsGenerator():
             plt.savefig(fname="%s/%s" % (settings.STATIC_ROOT, file_name_path))
 
         plt.close()
+
+    def fetch_graph_cdr_reporters(self, period_, file_name_path):
+        rp_df = pd.DataFrame()
+
+        # records per cdr reporter
+        sr_df = pd.DataFrame(list( SyndromicIncidences.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).values('reporter').annotate(no_reports=Count('reporter')).order_by('-no_reports') ))
+
+        # the chart will be too long, lets trim it
+        if len(sr_df) > settings.MAX_BARS: sr_df = sr_df.truncate(after=25)
+        sr_df = sr_df[::-1]     # flip values from top to bottom
+
+        # get the actual names of the reporters
+        key_cdrs = sr_df['reporter']
+        cdr_df = pd.DataFrame(list(DictionaryItems.objects.filter(t_key__in=key_cdrs).values('t_key', 't_value').distinct('t_key')))
+        recs = cdr_df.set_index('t_key').T.to_dict('records')[0]
+        sr_df['cdr_names'] = [recs[cdr['reporter']] for index, cdr in sr_df.iterrows()]
+
+        fig, ax = plt.subplots(1, figsize=(12, 8))
+        ax.barh(sr_df['cdr_names'], sr_df['no_reports'], 0.35, label='Most Active CDRs')
+        ax.set_ylabel('No of Reports')
+        ax.set_title('Top 25 CDR Reporters in %s' % period_['period_name'])
+        ax.xaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
+        plt.xlim(auto=True)
+
+        if settings.USE_S3 == 'True':
+            # push it to s3
+            client = boto3.client('s3', region_name=settings.AWS_S3_REGION_NAME)
+            img_name = '%s.png' % access_code
+            img.save(img_name)
+            client.upload_file(img_name, settings.AWS_STORAGE_BUCKET_NAME, 'static/qr_codes/%s' % img_name, ExtraArgs={'ACL':'public-read'})
+        else:
+            plt.savefig(fname="%s/%s" % (settings.STATIC_ROOT, file_name_path))
+
+        plt.close(fig)
+
+    def fetch_graph_disease_distibution(self, period_, species, file_name_path):
+        sd_df = pd.DataFrame(list( SyndromicDetails.objects.select_related('incidence').filter(incidence__datetime_reported__gte=period_['start']).filter(incidence__datetime_reported__lte=period_['end']).filter(species=species).values('prov_diagnosis').annotate(no_reports=Count('prov_diagnosis')) ))
+        
+        recs = sd_df.set_index('prov_diagnosis').T.to_dict('records')[0]
+        
+        # get the keys and split the diseases with multiple options
+        new_recs = {}
+        for diagnosis, count_ in recs.items():
+            if len(diagnosis.split(' ')) == 1:
+                new_recs[diagnosis] = count_ if diagnosis not in new_recs else new_recs[diagnosis] + count_
+                continue
+
+            # split this and add to our data frame
+            for cur_diag in diagnosis.split(' '):
+                new_recs[cur_diag] = count_ if cur_diag not in new_recs else new_recs[cur_diag] + count_
+
+        new_recs = pd.DataFrame(list(new_recs.items()), columns=['prov_diagnosis', 'counts'])
+
+        new_recs.sort_values(by=['counts'], inplace=True)
+        fig, ax = plt.subplots()
+        if len(new_recs) < 4:
+            # draw a pie chart
+            ax.pie(new_recs['counts'], labels=new_recs['prov_diagnosis'], autopct='%1.1f%%', shadow=False, startangle=90)
+            ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
+
+        elif len(new_recs) < 6:
+            ax.bar(new_recs['prov_diagnosis'], new_recs['counts'], 0.35, label='Diseases (Prov Diagnosis)')
+            ax.set_ylabel('No of Reports')
+            ax.set_title('Provisional Diagnosis Distribution for %s' % species)
+            ax.xaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
+            plt.ylim(auto=True)
+
+        else:
+            ax.barh(new_recs['prov_diagnosis'], new_recs['counts'], 0.35, label='Diseases (Prov Diagnosis)')
+            ax.set_xlabel('No of Reports')
+            ax.set_title('Provisional Diagnosis Distribution for %s' % species)
+            ax.xaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
+            plt.xlim(auto=True)
+
+
+        # we need a custom name for this file
+        
+        if settings.USE_S3 == 'True':
+            # push it to s3
+            client = boto3.client('s3', region_name=settings.AWS_S3_REGION_NAME)
+            img_name = '%s.png' % access_code
+            img.save(img_name)
+            client.upload_file(img_name, settings.AWS_STORAGE_BUCKET_NAME, 'static/qr_codes/%s' % img_name, ExtraArgs={'ACL':'public-read'})
+        else:
+            plt.savefig(fname="%s/%s" % (settings.STATIC_ROOT, file_name_path))
+
+        plt.close(fig)
+        print(new_recs)
+
+        # raise Exception('Quit for now')
 
 def generate_report_graphs():
     grapher = GraphsGenerator()
