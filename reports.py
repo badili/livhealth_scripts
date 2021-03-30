@@ -21,6 +21,7 @@ from django.views.generic import TemplateView
 from calendar import monthrange
 
 from wkhtmltopdf.views import PDFTemplateResponse, PDFTemplateView
+from wordcloud import (WordCloud, get_single_color_func)
 from hashids import Hashids
 from botocore.errorfactory import ClientError
 
@@ -77,7 +78,7 @@ def report_wrapper(request, hashid):
 
 class GraphsGenerator():
     # the graphs that we are going to generate
-    graph_names = ['reports', 'scvo_reporters', 'reports_trend', 'cdr_reporters', 'disease_distibution']
+    graph_names = ['reports', 'scvo_reporters', 'reports_trend', 'cdr_reporters', 'disease_distibution', 'wordcloud', 'n_diseases', 'abattoirs_reporters', 'abattoirs', 'abattoir_lesions']
 
     """
         graph periods coding
@@ -152,11 +153,11 @@ class GraphsGenerator():
         self.report_extra_details(period_)
         
         for r_type in self.graph_names:
-            if r_type == 'disease_distibution':
+            if r_type == 'disease_distibution' or r_type == 'wordcloud':
                 # we have multiple graphs here
                 all_species = list(SyndromicDetails.objects.select_related('incidence').filter(incidence__datetime_reported__gte=period_['start']).filter(incidence__datetime_reported__lte=period_['end']).values('species').distinct('species'))
                 for specie in all_species:
-                    report_details['graphs']['%s_%s' % (r_type, specie['species'])] = "%sreports/%s_disease_distibution_%s_%d_%d.jpg" % (settings.STATIC_URL, settings.PROJECT_NAME, specie['species'], g_year, g_period )
+                    report_details['graphs']['%s_%s' % (r_type, specie['species'])] = "%sreports/%s_%s_%s_%d_%d.jpg" % (settings.STATIC_URL, settings.PROJECT_NAME, r_type, specie['species'], g_year, g_period )
 
                 report_details['extra_info']['all_species'] = all_species
             else:
@@ -247,18 +248,36 @@ class GraphsGenerator():
             sentry_sdk.capture_exception(e)
             raise Exception('There was an error while generating the graphs')
 
+    def save_graphs(self, plt, file_name_path):
+        if settings.USE_S3 == 'True':
+            # push it to s3
+            client = boto3.client('s3', region_name=settings.AWS_S3_REGION_NAME)
+            img_name = '%s.png' % access_code
+            img.save(img_name)
+            client.upload_file(img_name, settings.AWS_STORAGE_BUCKET_NAME, 'static/qr_codes/%s' % img_name, ExtraArgs={'ACL':'public-read'})
+        else:
+            plt.savefig(fname="%s/%s" % (settings.STATIC_ROOT, file_name_path))
+
+        plt.close()
+
     def fetch_graph_reports(self, period_, r_type, file_name_path):
         if r_type == 'reports': self.fetch_graph_received_reports(period_, file_name_path)
         elif r_type == 'scvo_reporters': self.fetch_graph_scvo_reporters(period_, file_name_path)
         elif r_type == 'reports_trend': self.fetch_graph_reports_trend(period_, file_name_path)
         elif r_type == 'cdr_reporters': self.fetch_graph_cdr_reporters(period_, file_name_path)
-        elif r_type == 'disease_distibution':
+        elif r_type == 'n_diseases': self.fetch_graph_n_diseases(period_, file_name_path)
+        elif r_type == 'abattoirs_reporters': self.fetch_graph_abattoirs_reporters(period_, file_name_path)
+        elif r_type == 'abattoirs': self.fetch_graph_abattoirs_reports(period_, file_name_path)
+        elif r_type == 'abattoir_lesions': self.fetch_graph_abattoir_lesions(period_, file_name_path)
+        elif r_type == 'disease_distibution' or r_type == 'wordcloud':
             # get the species in this period
             all_species = list(SyndromicDetails.objects.select_related('incidence').filter(incidence__datetime_reported__gte=period_['start']).filter(incidence__datetime_reported__lte=period_['end']).values('species').distinct('species'))
             
             for specie in all_species:
-                file_name_path = "reports/%s_disease_distibution_%s_%d_%d.jpg" % (settings.PROJECT_NAME, specie['species'], period_['year'], period_['gid'] )
-                self.fetch_graph_disease_distibution(period_, specie['species'], file_name_path)
+                file_name_path = "reports/%s_%s_%s_%d_%d.jpg" % (settings.PROJECT_NAME, r_type, specie['species'], period_['year'], period_['gid'] )
+                
+                if r_type == 'disease_distibution': self.fetch_graph_disease_distibution(period_, specie['species'], file_name_path)
+                elif r_type == 'wordcloud': self.fetch_graph_syndromes_wordcloud(period_, specie['species'], file_name_path)
 
     def fetch_graph_received_reports(self, period_, file_name_path):
         """
@@ -322,16 +341,7 @@ class GraphsGenerator():
         ax.yaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
         plt.xlim(auto=True)
 
-        if settings.USE_S3 == 'True':
-            # push it to s3
-            client = boto3.client('s3', region_name=settings.AWS_S3_REGION_NAME)
-            img_name = '%s.png' % access_code
-            img.save(img_name)
-            client.upload_file(img_name, settings.AWS_STORAGE_BUCKET_NAME, 'static/qr_codes/%s' % img_name, ExtraArgs={'ACL':'public-read'})
-        else:
-            plt.savefig(fname="%s/%s" % (settings.STATIC_ROOT, file_name_path))
-
-        plt.close(fig)
+        self.save_graphs(plt, file_name_path)
 
     def fetch_graph_scvo_reporters(self, period_, file_name_path):
         # fetch and graph data on number of reports per sub county vets
@@ -448,8 +458,6 @@ class GraphsGenerator():
         plt.close()
 
     def fetch_graph_cdr_reporters(self, period_, file_name_path):
-        rp_df = pd.DataFrame()
-
         # records per cdr reporter
         sr_df = pd.DataFrame(list( SyndromicIncidences.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).values('reporter').annotate(no_reports=Count('reporter')).order_by('-no_reports') ))
 
@@ -470,18 +478,10 @@ class GraphsGenerator():
         ax.xaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
         plt.xlim(auto=True)
 
-        if settings.USE_S3 == 'True':
-            # push it to s3
-            client = boto3.client('s3', region_name=settings.AWS_S3_REGION_NAME)
-            img_name = '%s.png' % access_code
-            img.save(img_name)
-            client.upload_file(img_name, settings.AWS_STORAGE_BUCKET_NAME, 'static/qr_codes/%s' % img_name, ExtraArgs={'ACL':'public-read'})
-        else:
-            plt.savefig(fname="%s/%s" % (settings.STATIC_ROOT, file_name_path))
-
-        plt.close(fig)
+        self.save_graphs(plt, file_name_path)
 
     def fetch_graph_disease_distibution(self, period_, species, file_name_path):
+        if os.path.exists("%s/%s" % (settings.STATIC_ROOT, file_name_path)): return
         sd_df = pd.DataFrame(list( SyndromicDetails.objects.select_related('incidence').filter(incidence__datetime_reported__gte=period_['start']).filter(incidence__datetime_reported__lte=period_['end']).filter(species=species).values('prov_diagnosis').annotate(no_reports=Count('prov_diagnosis')) ))
         
         recs = sd_df.set_index('prov_diagnosis').T.to_dict('records')[0]
@@ -520,22 +520,152 @@ class GraphsGenerator():
             ax.xaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
             plt.xlim(auto=True)
 
+        self.save_graphs(plt, file_name_path)
 
-        # we need a custom name for this file
+    def fetch_graph_syndromes_wordcloud(self, period_, species, file_name_path):
+        if os.path.exists("%s/%s" % (settings.STATIC_ROOT, file_name_path)): return
+        sd = SyndromicDetails.objects.select_related('incidence').filter(incidence__datetime_reported__gte=period_['start']).filter(incidence__datetime_reported__lte=period_['end']).filter(species=species).values('clinical_signs')
+
+        all_signs = []
+        all_sign_names = []
+        for sign_ in sd:
+            for sn in sign_['clinical_signs'].split(' '): all_signs.append(sn)
+                
+        unique_signs = set(all_signs)
         
-        if settings.USE_S3 == 'True':
-            # push it to s3
-            client = boto3.client('s3', region_name=settings.AWS_S3_REGION_NAME)
-            img_name = '%s.png' % access_code
-            img.save(img_name)
-            client.upload_file(img_name, settings.AWS_STORAGE_BUCKET_NAME, 'static/qr_codes/%s' % img_name, ExtraArgs={'ACL':'public-read'})
+        signs_df = pd.DataFrame(list(DictionaryItems.objects.filter(t_key__in=unique_signs).values('t_key', 't_value').distinct('t_key')))
+        signs_names = signs_df.set_index('t_key').T.to_dict('records')[0]
+
+        for sn in all_signs: all_sign_names.append('"%s"' % signs_names[sn])
+
+        # wc = WordCloud(collocations=False).generate(text.lower())
+        wordcloud = WordCloud(width = 800, height = 300, background_color ='white', min_font_size = 10).generate(' '.join(all_sign_names))
+  
+        # plot the WordCloud image                       
+        plt.figure(figsize = (8, 8), facecolor = None)
+        plt.imshow(wordcloud)
+        plt.axis("off")
+        plt.tight_layout(pad = 0)
+        
+        self.save_graphs(plt, file_name_path)
+
+    def fetch_graph_n_diseases(self, period_, file_name_path):
+        nd_df = pd.DataFrame(list( NDDetail.objects.select_related('nd_report').filter(nd_report__datetime_reported__gte=period_['start']).filter(nd_report__datetime_reported__lte=period_['end']).values('disease').annotate(no_reports=Count('disease')).order_by('-no_reports') ))
+
+        if not nd_df.empty:
+            nd_df = nd_df[::-1]
+            fig, ax = plt.subplots()
+
+            ax.barh(nd_df['disease'], nd_df['no_reports'], 0.35, label='Notifiable Diseases')
+            ax.set_xlabel('No of Reports')
+            ax.set_title('Reported Notifiable Diseases during %s' % period_['period_name'])
+            ax.xaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
+            plt.xlim(auto=True)
+        
         else:
-            plt.savefig(fname="%s/%s" % (settings.STATIC_ROOT, file_name_path))
+            plt.text(0.1, 0.5, 'There were no notifiable diseases reported in %s' % period_['period_name'], fontsize=10, color='red')
 
-        plt.close(fig)
-        print(new_recs)
+        self.save_graphs(plt, file_name_path)
 
-        # raise Exception('Quit for now')
+    def fetch_graph_abattoirs_reporters(self, period_, file_name_path):
+        sh_reporters = pd.DataFrame(list( SHReport.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).values('reporter').annotate(no_reports=Count('reporter')).order_by('-no_reports') ))
+
+        if sh_reporters.empty:
+            plt.text(0.1, 0.5, 'Slaughter house data was not submitted for %s' % period_['period_name'], fontsize=10, color='red')
+        
+        else:
+            # get the actual names of the reporters
+            reporters = sh_reporters['reporter']
+            reporters_df = pd.DataFrame(list(DictionaryItems.objects.filter(t_key__in=reporters).values('t_key', 't_value').distinct('t_key')))
+            if reporters_df.empty:
+                reporter_names = reporters
+            else:
+                recs = reporters_df.set_index('t_key').T.to_dict('records')[0]
+                reporter_names = [recs[reporter['reporter']] for index, reporter in reporters_df.iterrows()]
+
+            fig, ax = plt.subplots(1, figsize=(12, 8))
+            ax.bar(reporter_names, sh_reporters['no_reports'], 0.35, label='Reporters')
+            ax.set_ylabel('No of Reports')
+            ax.set_title('Reporting by Slaughter House Reporters in %s' % period_['period_name'])
+            ax.yaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
+            plt.ylim(auto=True)
+            
+        self.save_graphs(plt, file_name_path)
+
+    def fetch_graph_abattoirs_reports(self, period_, file_name_path):
+        # get the abattoirs and species
+        all_species = pd.DataFrame(list(SHSpecies.objects.select_related('sh_report').filter(sh_report__datetime_reported__gte=period_['start']).filter(sh_report__datetime_reported__lte=period_['end']).values('specie').distinct('specie')))
+        all_abattoirs = pd.DataFrame(list(SHReport.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).values('abattoir').distinct('abattoir')))
+
+        sh_records = pd.DataFrame(list( SHSpecies.objects.select_related('sh_report').filter(sh_report__datetime_reported__gte=period_['start']).filter(sh_report__datetime_reported__lte=period_['end']).values('sh_report__abattoir', 'specie').annotate(no_reports=Sum('no_slaughtered')).order_by('sh_report__abattoir', 'specie') ))
+
+        if sh_records.empty:
+            plt.text(0.1, 0.5, 'Slaughter house data was not submitted for %s' % period_['period_name'], fontsize=10, color='red')
+        
+        else:
+            sh_df = pd.pivot_table(sh_records, values='no_reports', columns=['specie'], index=['sh_report__abattoir'], aggfunc=np.sum, fill_value=0)
+            species_ = list(sh_df.keys())
+            sh_df['total'] = sh_df.sum(axis=1)
+
+            sh_df.sort_values('total', ascending=False, inplace=True)
+
+            # calculate the %-ages for the data columns
+            for i in species_: sh_df['{}_perc'.format(i)] = sh_df[i] / sh_df['total']
+
+            fig, ax = plt.subplots(1, figsize=(12, 8))
+            bottom = len(all_abattoirs) * [0]
+            for i, col_ in enumerate(species_):
+                col = '%s_perc' % col_
+                ax.bar(all_abattoirs['abattoir'], sh_df[col_], 0.35, label=species_[i], bottom=bottom)
+                bottom = bottom + sh_df[col_]
+
+            ax.set_xlabel('Slaughter Houses')
+            ax.set_ylabel('Number of Slaughtered Animals')
+            ax.set_title('Slaughtered Animals in %s' % period_['period_name'])
+            
+            ax.legend(frameon=False, loc='best', fontsize='small')      # show the legend
+            ax.yaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
+            plt.xlim(auto=True)
+
+        self.save_graphs(plt, file_name_path)
+
+    def fetch_graph_abattoir_lesions(self, period_, file_name_path):
+        all_species = pd.DataFrame(list(SHSpecies.objects.select_related('sh_report').filter(sh_report__datetime_reported__gte=period_['start']).filter(sh_report__datetime_reported__lte=period_['end']).values('specie').distinct('specie')))
+        sh_lesions = pd.DataFrame(list( SHParts.objects.select_related('sh_specie', 'sh_report').filter(sh_specie__sh_report__datetime_reported__gte=period_['start']).filter(sh_specie__sh_report__datetime_reported__lte=period_['end']).values('lesions', 'sh_specie__specie').annotate(no_lesions=Sum('no_condemned')).order_by('lesions', 'sh_specie__specie') ))
+
+        if sh_lesions.empty:
+            plt.text(0.1, 0.5, 'Slaughter house data was not submitted for %s' % period_['period_name'], fontsize=10, color='red')
+        
+        else:
+            sh_lesions = pd.pivot_table(sh_lesions, values='no_lesions', columns=['sh_specie__specie'], index=['lesions'], aggfunc=np.sum, fill_value=0, margins=True).sort_values('All', ascending=False).sort_values('All', ascending=False, axis=1).drop('All').drop('All', axis=1)
+            
+            for specie in all_species['specie']:
+                if specie not in sh_lesions.keys(): sh_lesions[specie] = len(all_species['sh_specie__specie']) * [0]
+
+            lesions_df = pd.DataFrame(list(DictionaryItems.objects.filter(t_key__in=list(sh_lesions.axes[0])).values('t_key', 't_value').distinct('t_key')))
+            recs = lesions_df.set_index('t_key').T.to_dict('records')[0]
+            lesion_names = [recs[ls] for ls in list(sh_lesions.axes[0])]
+            sh_lesions['lesion_name'] = lesion_names
+
+            fig, ax = plt.subplots(1, figsize=(12, 8))
+            left_w = np.arange(len(lesion_names))
+            bar_width = 0.1
+            
+            ax = sh_lesions.plot(kind="bar", figsize=(12, 8))
+            ax.set_xlabel('Observed Lesions', labelpad=15)
+            ax.set_ylabel('No of observed lesions', labelpad=15)
+            
+            plt.xticks(rotation=0)
+            ax.set_xticks(left_w + bar_width)
+            ax.set_xticklabels(lesion_names)
+            
+            ax.legend(frameon=False, loc='best', fontsize='small')      # show the legend
+            ax.yaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
+
+            ax.set_title('Observed lesions per species', pad=15)
+            fig.tight_layout()
+
+        self.save_graphs(plt, file_name_path)
 
 def generate_report_graphs():
     grapher = GraphsGenerator()
