@@ -78,7 +78,7 @@ def report_wrapper(request, hashid):
 
 class GraphsGenerator():
     # the graphs that we are going to generate
-    graph_names = ['reports', 'scvo_reporters', 'reports_trend', 'cdr_reporters', 'disease_distibution', 'wordcloud', 'n_diseases', 'abattoirs_reporters', 'abattoirs', 'abattoir_lesions']
+    graph_names = ['reports', 'scvo_reporters', 'reports_trend', 'cdr_reporters', 'disease_distibution', 'wordcloud', 'n_diseases', 'abattoirs_reporters', 'abattoirs', 'abattoir_lesions', 'drugs_sold', 'drug_sale_location']
 
     """
         graph periods coding
@@ -269,6 +269,8 @@ class GraphsGenerator():
         elif r_type == 'abattoirs_reporters': self.fetch_graph_abattoirs_reporters(period_, file_name_path)
         elif r_type == 'abattoirs': self.fetch_graph_abattoirs_reports(period_, file_name_path)
         elif r_type == 'abattoir_lesions': self.fetch_graph_abattoir_lesions(period_, file_name_path)
+        elif r_type == 'drugs_sold': self.fetch_graph_drugs_sold(period_, file_name_path)
+        elif r_type == 'drug_sale_location': self.fetch_graph_drug_sale_location(period_, file_name_path)
         elif r_type == 'disease_distibution' or r_type == 'wordcloud':
             # get the species in this period
             all_species = list(SyndromicDetails.objects.select_related('incidence').filter(incidence__datetime_reported__gte=period_['start']).filter(incidence__datetime_reported__lte=period_['end']).values('species').distinct('species'))
@@ -666,6 +668,65 @@ class GraphsGenerator():
             fig.tight_layout()
 
         self.save_graphs(plt, file_name_path)
+
+    def fetch_graph_drugs_sold(self, period_, file_name_path):
+        ag_df = pd.DataFrame(list( AGDetail.objects.select_related('ag_report').filter(ag_report__datetime_reported__gte=period_['start']).filter(ag_report__datetime_reported__lte=period_['end']).values('drug_sold').annotate(no_drugs=Count('drug_sold')).order_by('-no_drugs') ))
+
+        if ag_df.empty:
+            plt.text(0.1, 0.5, 'There were no agrovet records submitted for %s' % period_['period_name'], fontsize=10, color='red')
+        
+        else:
+            ag_df = ag_df[::-1]
+            fig, ax = plt.subplots()
+
+            ax.barh(ag_df['drug_sold'], ag_df['no_drugs'], 0.35, label='Drugs')
+            ax.set_xlabel('No of drugs sold')
+            ax.set_title('Drugs sold during %s' % period_['period_name'])
+            ax.xaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
+            plt.xlim(auto=True)
+            fig.tight_layout()
+
+        self.save_graphs(plt, file_name_path)
+
+
+    def fetch_graph_drug_sale_location(self, period_, file_name_path):
+        ag_df = pd.DataFrame(list( AGDetail.objects.select_related('ag_report').filter(ag_report__datetime_reported__gte=period_['start']).filter(ag_report__datetime_reported__lte=period_['end']).values('drug_sold', 'farmer_location').annotate(no_drugs=Count('drug_sold')).order_by('drug_sold', 'farmer_location') ))
+
+        if ag_df.empty:
+            plt.text(0.1, 0.5, 'There were no agrovet records submitted for %s' % period_['period_name'], fontsize=10, color='red')
+        
+        else:
+            ag_df = pd.pivot_table(ag_df, values='no_drugs', columns=['drug_sold'], index=['farmer_location'], aggfunc=np.sum, fill_value=0, margins=True).sort_values('All', ascending=False).sort_values('All', ascending=False, axis=1).drop('All').drop('All', axis=1)
+            drugs_sold = ag_df.to_numpy()
+            drugs_list = list(ag_df.axes[1])
+            
+            locations_df = pd.DataFrame(list(DictionaryItems.objects.filter(t_key__in=list(ag_df.axes[0])).values('t_key', 't_value').distinct('t_key')))
+            recs = locations_df.set_index('t_key').T.to_dict('records')[0]
+            locations_names = [recs[lns] for lns in list(ag_df.axes[0])]
+
+            fig, ax = plt.subplots(figsize=(12, 15))
+            im = ax.imshow(drugs_sold)
+
+            # We want to show all ticks...
+            ax.set_xticks(np.arange(len(drugs_list)))
+            ax.set_yticks(np.arange(len(locations_names)))
+            # ... and label them with the respective list entries
+            ax.set_xticklabels(drugs_list)
+            ax.set_yticklabels(locations_names)
+
+            # Rotate the tick labels and set their alignment.
+            plt.setp(ax.get_xticklabels(), rotation=90, ha="right", rotation_mode="anchor")
+
+            # Loop over data dimensions and create text annotations.
+            for i in range(len(locations_names)):
+                for j in range(len(drugs_list)):
+                    text = ax.text(j, i, drugs_sold[i, j], ha="center", va="center", color="w")
+
+            ax.set_title("Drug sales per location during %s" % period_['period_name'])
+            fig.tight_layout()
+
+        self.save_graphs(plt, file_name_path)
+
 
 def generate_report_graphs():
     grapher = GraphsGenerator()
