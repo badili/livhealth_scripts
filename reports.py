@@ -44,7 +44,15 @@ def report_wrapper(request, hashid):
         
         header_template_ = 'reports/header.html'
         footer_template_ = 'reports/footer.html'
-        cmd_options_ = { 'margin-top': 3, 'disable-smart-shrinking': True }
+        cmd_options_ = {
+            'margin-top': '10mm',
+            'margin-left': '20mm',
+            'margin-bottom': '20mm',
+            'disable-smart-shrinking': True,
+            'footer-right': 'Page [page] of [topage]',
+            'footer-font-size': 9,
+            'footer-line': True
+        }
 
         report_vars = {
             'report_title': '%s %s' % (report_details['title'], report_details['period']),
@@ -58,10 +66,11 @@ def report_wrapper(request, hashid):
         raise Exception('There was an error while fetching the report')
 
 
-
     class ReportView(PDFTemplateView):
         filename = filename_
         template_name = template_name_
+        footer_template = footer_template_
+        cmd_options = cmd_options_
 
         def get_context_data(self, **kwargs):
             context = super(ReportView, self).get_context_data(**kwargs)
@@ -240,7 +249,7 @@ class GraphsGenerator():
 
                     except:
                         # Not found
-                        print("\nGenerate the '%s' report for %s%s" % (r_type, period_['year'], '' if key_ == 'fy' else '_%s%d' % (key_, period_['no'])) )
+                        print("Generate the '%s' report for %s%s" % (r_type, period_['year'], '' if key_ == 'fy' else '_%s%d' % (key_, period_['no'])) )
                         self.fetch_graph_reports(period_, r_type, file_name_path)
 
         except Exception as e:
@@ -285,7 +294,6 @@ class GraphsGenerator():
         """
             Fetch, analyse and graph data for the received reports
         """
-
         rp_df = pd.DataFrame()
         rp_df['sub_counties'] = settings.SUB_COUNTIES
 
@@ -327,6 +335,7 @@ class GraphsGenerator():
         
 
         fig, ax = plt.subplots(1, figsize=(12, 8))
+        ax.tick_params(labelsize='medium')
 
         bottom = len(settings.SUB_COUNTIES) * [0]
         for i, col_ in enumerate(data_cols):
@@ -334,14 +343,14 @@ class GraphsGenerator():
             ax.bar(settings.SUB_COUNTIES, rp_df[col_], 0.35, label=data_labels[i], bottom=bottom)
             bottom = bottom + rp_df[col_]
 
-        
-        ax.set_ylabel('No of Records')
+        ax.set_ylabel('No of Records', fontsize=14)
+        ax.set_xlabel('Sub Counties', fontsize=14)
         ax.set_title('Sub County Reporting for %s %s %d' % (period_['name'], period_['no'], period_['year']))
-        
 
-        ax.legend(frameon=False, loc='best', fontsize='small')      # show the legend
+        ax.legend(frameon=False, loc='best')      # show the legend
         ax.yaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
         plt.xlim(auto=True)
+        fig.tight_layout()
 
         self.save_graphs(plt, file_name_path)
 
@@ -441,6 +450,7 @@ class GraphsGenerator():
         data_labels = ['Syndromic Records', 'Notifiable Diseases', 'Zero Reports']
 
         # plot the line graph
+        fig, ax = plt.subplots(1, figsize=(12, 8))
         plt.plot(grp_periods, rp_df['total'])
         plt.title('Reporting trend for %s' % period_['period_name'], fontsize=14)
         plt.xlabel(grp_periods_name, fontsize=12)
@@ -448,16 +458,7 @@ class GraphsGenerator():
         plt.xlim(auto=True)
         plt.grid(True)
 
-        if settings.USE_S3 == 'True':
-            # push it to s3
-            client = boto3.client('s3', region_name=settings.AWS_S3_REGION_NAME)
-            img_name = '%s.png' % access_code
-            img.save(img_name)
-            client.upload_file(img_name, settings.AWS_STORAGE_BUCKET_NAME, 'static/qr_codes/%s' % img_name, ExtraArgs={'ACL':'public-read'})
-        else:
-            plt.savefig(fname="%s/%s" % (settings.STATIC_ROOT, file_name_path))
-
-        plt.close()
+        self.save_graphs(plt, file_name_path)
 
     def fetch_graph_cdr_reporters(self, period_, file_name_path):
         # records per cdr reporter
@@ -475,10 +476,12 @@ class GraphsGenerator():
 
         fig, ax = plt.subplots(1, figsize=(12, 8))
         ax.barh(sr_df['cdr_names'], sr_df['no_reports'], 0.35, label='Most Active CDRs')
-        ax.set_ylabel('No of Reports')
+        ax.set_ylabel('Community Disease Reporters (CDRs)', labelpad=15)
+        ax.set_xlabel('No of Reports', labelpad=15)
         ax.set_title('Top 25 CDR Reporters in %s' % period_['period_name'])
         ax.xaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
         plt.xlim(auto=True)
+        # fig.tight_layout()
 
         self.save_graphs(plt, file_name_path)
 
@@ -502,7 +505,7 @@ class GraphsGenerator():
         new_recs = pd.DataFrame(list(new_recs.items()), columns=['prov_diagnosis', 'counts'])
 
         new_recs.sort_values(by=['counts'], inplace=True)
-        fig, ax = plt.subplots()
+        fig, ax = plt.subplots(figsize=(12, 8))
         if len(new_recs) < 4:
             # draw a pie chart
             ax.pie(new_recs['counts'], labels=new_recs['prov_diagnosis'], autopct='%1.1f%%', shadow=False, startangle=90)
@@ -511,17 +514,18 @@ class GraphsGenerator():
         elif len(new_recs) < 6:
             ax.bar(new_recs['prov_diagnosis'], new_recs['counts'], 0.35, label='Diseases (Prov Diagnosis)')
             ax.set_ylabel('No of Reports')
-            ax.set_title('Provisional Diagnosis Distribution for %s' % species)
+            ax.set_title('Differential diagnosis for %s in %s' % (species, period_['period_name']))
             ax.xaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
             plt.ylim(auto=True)
 
         else:
             ax.barh(new_recs['prov_diagnosis'], new_recs['counts'], 0.35, label='Diseases (Prov Diagnosis)')
             ax.set_xlabel('No of Reports')
-            ax.set_title('Provisional Diagnosis Distribution for %s' % species)
+            ax.set_title('Differential diagnosis for %s in %s' % (species, period_['period_name']))
             ax.xaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
             plt.xlim(auto=True)
 
+        fig.tight_layout()
         self.save_graphs(plt, file_name_path)
 
     def fetch_graph_syndromes_wordcloud(self, period_, species, file_name_path):
@@ -544,7 +548,7 @@ class GraphsGenerator():
         wordcloud = WordCloud(width = 800, height = 300, background_color ='white', min_font_size = 10).generate(' '.join(all_sign_names))
   
         # plot the WordCloud image                       
-        plt.figure(figsize = (8, 8), facecolor = None)
+        plt.figure(figsize = (15, 4), facecolor = None)
         plt.imshow(wordcloud)
         plt.axis("off")
         plt.tight_layout(pad = 0)
@@ -556,13 +560,14 @@ class GraphsGenerator():
 
         if not nd_df.empty:
             nd_df = nd_df[::-1]
-            fig, ax = plt.subplots()
+            fig, ax = plt.subplots(figsize=(12, 8))
 
             ax.barh(nd_df['disease'], nd_df['no_reports'], 0.35, label='Notifiable Diseases')
             ax.set_xlabel('No of Reports')
             ax.set_title('Reported Notifiable Diseases during %s' % period_['period_name'])
             ax.xaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
             plt.xlim(auto=True)
+            fig.tight_layout()
         
         else:
             plt.text(0.1, 0.5, 'There were no notifiable diseases reported in %s' % period_['period_name'], fontsize=10, color='red')
@@ -591,6 +596,7 @@ class GraphsGenerator():
             ax.set_title('Reporting by Slaughter House Reporters in %s' % period_['period_name'])
             ax.yaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
             plt.ylim(auto=True)
+            fig.tight_layout()
             
         self.save_graphs(plt, file_name_path)
 
@@ -628,6 +634,7 @@ class GraphsGenerator():
             ax.legend(frameon=False, loc='best', fontsize='small')      # show the legend
             ax.yaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
             plt.xlim(auto=True)
+            fig.tight_layout()
 
         self.save_graphs(plt, file_name_path)
 
@@ -677,7 +684,7 @@ class GraphsGenerator():
         
         else:
             ag_df = ag_df[::-1]
-            fig, ax = plt.subplots()
+            fig, ax = plt.subplots(figsize=(12, 8))
 
             ax.barh(ag_df['drug_sold'], ag_df['no_drugs'], 0.35, label='Drugs')
             ax.set_xlabel('No of drugs sold')
@@ -687,7 +694,6 @@ class GraphsGenerator():
             fig.tight_layout()
 
         self.save_graphs(plt, file_name_path)
-
 
     def fetch_graph_drug_sale_location(self, period_, file_name_path):
         ag_df = pd.DataFrame(list( AGDetail.objects.select_related('ag_report').filter(ag_report__datetime_reported__gte=period_['start']).filter(ag_report__datetime_reported__lte=period_['end']).values('drug_sold', 'farmer_location').annotate(no_drugs=Count('drug_sold')).order_by('drug_sold', 'farmer_location') ))
@@ -704,7 +710,7 @@ class GraphsGenerator():
             recs = locations_df.set_index('t_key').T.to_dict('records')[0]
             locations_names = [recs[lns] for lns in list(ag_df.axes[0])]
 
-            fig, ax = plt.subplots(figsize=(12, 15))
+            fig, ax = plt.subplots(figsize=(9, 12))
             im = ax.imshow(drugs_sold)
 
             # We want to show all ticks...
