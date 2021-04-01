@@ -55,7 +55,7 @@ def report_wrapper(request, hashid):
         }
 
         report_vars = {
-            'report_title': '%s %s' % (report_details['title'], report_details['period']),
+            'report_title': '%s %s' % (report_details['title'], report_details['period_name']),
             'report_period': 'January',
             'details': report_details
         }
@@ -113,7 +113,6 @@ class GraphsGenerator():
 
         decoded = my_hashids.decode(hashid)
         # print(my_hashids.encode(2020, 0))
-        
         g_year = decoded[0]
         g_period = decoded[1] if len(decoded) == 2 else None
 
@@ -128,38 +127,44 @@ class GraphsGenerator():
 
         period_code = None
         if g_period == 0:
-            report_period = 'Year'
+            # interested in years
+            report_period = g_year
             report_details['period_type'] = 'year'
             report_details['report_template'] = 'reports/monthly_report.html'
-            report_details['first_date'] = dt.date(g_year, 1, 1)
+            report_details['first_date'] = dt.date(g_year + 1, 1, 1)            # for us to get the requested year, ran the reports with Jan-01-NextYear as the requested date
             period_code = 'fy'
 
         elif g_period < 13:
+            # interested in months
             report_period = dt.date(g_year, g_period, 1).strftime("%B")
             report_details['period_type'] = 'Month'
             report_details['report_template'] = 'reports/monthly_report.html'
-            report_details['first_date'] = dt.date(g_year, g_period, 1)
+            if g_period == 12: report_details['first_date'] = dt.date(g_year + 1, 1, 1)
+            else: report_details['first_date'] = dt.date(g_year, g_period + 1, 1)
             period_code = 'fm'
 
         elif g_period < 17:
+            # interested in quarters
             report_period = 'Quarter %d,' % (g_period - 12)
             report_details['period_type'] = 'Quarter'
             report_details['report_template'] = 'reports/monthly_report.html'
-            report_details['first_date'] = dt.date(g_year, ((g_period -12) * 3) - 2, 1)
+            if g_period == 16: report_details['first_date'] = dt.date(g_year + 1, 1, 1)
+            else: report_details['first_date'] = dt.date(g_year, ((g_period - 12) * 3) - 2, 1)
             period_code = 'fq'
 
         else:
             report_period = '%d Half of ' % (g_period - 16)
             report_details['period_type'] = 'Half Year'
             report_details['report_template'] = 'reports/monthly_report.html'
-            report_details['first_date'] = dt.date(g_year, ((g_period - 16) * 6) - 5, 1)
+            if g_period == 18: report_details['first_date'] = dt.date(g_year + 1, 1, 1)
+            else: report_details['first_date'] = dt.date(g_year, ((g_period - 16) * 6) - 5, 1)
             period_code = 'fh'
 
         report_details['extra_info'] = {}
         # get the period date details
         self.determine_graphs_period(report_details['first_date'])
         period_ = self.t_period[period_code]
-        self.report_extra_details(period_)
+        report_details['extras'] = self.report_extra_details(period_)
         
         for r_type in self.graph_names:
             if r_type == 'disease_distibution' or r_type == 'wordcloud':
@@ -181,20 +186,99 @@ class GraphsGenerator():
 
     def report_extra_details(self, period_):
         # get the additional details for this report
-
-        # get the species whose graphs have been generated for the disease distribution
         to_return = {}
+        
+        # total reports received
+        sr_df = self.fetch_graph_received_reports(period_, 'dummy_file_path', True)
+
+        to_return['rec_reports_top_county'] = sr_df['sub_county'].iloc[0]
+        to_return['rec_reports_top_county_nos'] = int(sr_df['total'].iloc[0])
+        to_return['rec_reports_total'] = int(sr_df['total'].sum())
+
+        # trend
+        (rp_df, period_name, data_labels) = self.fetch_graph_reports_trend(period_, 'dummy_file_path', True)
+        rp_df.sort_values('total', ascending=False, inplace=True)
+        
+        to_return['high_reports_breakdown'] = '%d %s, %d %s and %d %s - %d total' % (rp_df['syndromics'].iloc[0], data_labels[0], rp_df['nd1'].iloc[0], data_labels[1], rp_df['zero'].iloc[0], data_labels[2], rp_df['total'].iloc[0])
+        to_return['low_reports_breakdown'] = '%d %s, %d %s and %d %s - %d total' % (rp_df['syndromics'].iloc[-1], data_labels[0], rp_df['nd1'].iloc[-1], data_labels[1], rp_df['zero'].iloc[-1], data_labels[2], rp_df['total'].iloc[-1])
+        
+        if period_['gid'] == 0:
+            to_return['high_reports_1_period'] = '%s %s' % (dt.date(period_['year'], int(rp_df['grp_periods'].iloc[0]), 1).strftime("%B"), period_['year'])
+            to_return['high_reports_2_period'] = '%s %s' % (dt.date(period_['year'], int(rp_df['grp_periods'].iloc[1]), 1).strftime("%B"), period_['year'])
+            to_return['high_reports_last_period'] = '%s %s' % (dt.date(period_['year'], int(rp_df['grp_periods'].iloc[-1]), 1).strftime("%B"), period_['year'])
+
+        elif period_['gid'] < 13:
+            to_return['high_reports_1_period'] = dt.date(period_['year'], period_['gid'], int(rp_df['grp_periods'].iloc[0])).strftime("%b %d (%A)")
+            to_return['high_reports_2_period'] = dt.date(period_['year'], period_['gid'], int(rp_df['grp_periods'].iloc[1])).strftime("%b %d (%A)")
+            to_return['high_reports_last_period'] = dt.date(period_['year'], period_['gid'], int(rp_df['grp_periods'].iloc[-1])).strftime("%b %d (%A)")
+
+        else:
+            to_return['high_reports_1_period'] = 'Week %d' % rp_df['grp_periods'].iloc[0]
+            to_return['high_reports_2_period'] = 'Week %d' % rp_df['grp_periods'].iloc[1]
+            to_return['high_reports_last_period'] = 'Week %d' % rp_df['grp_periods'].iloc[-1]
+
+        # CDRs
+        sr_df = self.fetch_graph_cdr_reporters(period_, 'dummy_file_path', True)
+        to_return['cdr_highest'] = sr_df['cdr_names'][0]
+        to_return['cdr_highest_reports'] = sr_df['no_reports'][0]
+
+        # notifiable diseases
+        nd_df = self.fetch_graph_n_diseases(period_, 'dummy_file_path', True)
+        if nd_df.empty: to_return['nd_sum'] = 0
+        else:
+            to_return['nd_high1'] = nd_df['disease'][0]
+            to_return['nd_high2'] = nd_df['disease'][1]
+            to_return['nd_low1'] = nd_df['disease'].iloc[0]
+            to_return['nd_low2'] = nd_df['disease'].iloc[1]
+            to_return['nd_sum'] = sum(nd_df['no_reports'])
+
+        sh_df, sh_reporters = self.fetch_graph_abattoirs_reporters(period_, 'dummy_file_path', True)
+        if sh_df.empty: to_return['sh_sum'] = 0
+        else:
+            to_return['sh_high_reporter'] = sh_reporters[0]
+            to_return['sh_sum'] = sum(sh_df['no_reports'])
+            to_return['sh_high_abattoir'] = sh_df['reporter'][0]
+            to_return['sh_high_reporter_no'] = sh_df['no_reports'][0]
+            to_return['sh_high_reporter_perc'] = "%.1f" % ((sh_df['no_reports'][0] / to_return['sh_sum'])*100)
+
+        sh_df, species_, all_abattoirs = self.fetch_graph_abattoirs_reports(period_, 'dummy_file_path', True)
+        if sh_df.empty: to_return['sh_sl_sum'] = 0
+        else:
+            to_return['sh_sl_sum'] = int(sum(sh_df['total']))
+            to_return['sh_sl_high_specie'] = species_[0]
+            to_return['sh_sl_high_specie_perc'] = "%.1f" % (( sum(sh_df[to_return['sh_sl_high_specie']]) / sum(sh_df['total']))*100)
+            to_return['sh_sl_high_abattoir'] = all_abattoirs[0]
+            to_return['sh_sl_high_abattoir_perc'] = "%.1f" % (( sh_df['total'].iloc[0] / sum(sh_df['total']))*100)
+
+        sh_lesions = self.fetch_graph_abattoir_lesions(period_, 'dummy_file_path', True)
+        if sh_lesions.empty: to_return['sh_ls_sum'] = 0
+        else:
+            to_return['sh_ls_sum'] = 100    # put an arbitrary figure to show the data frame is not emty
+            to_return['sh_ls_top_lesion'] = sh_lesions['lesion_name'].iloc[0]
+
+        ag_reports = self.fetch_graph_drugs_sold(period_, 'dummy_file_path', True)
+
+        if ag_reports.empty: to_return['ag_reports_received'] = 0
+        else:
+            agrovets = pd.DataFrame(list( AGReport.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).values('agrovet_name').annotate(no_drugs=Count('agrovet_name')).order_by('-no_drugs') ))
+
+            to_return['ag_reports_received'] = sum(ag_reports['no_drugs'])
+            to_return['ag_reports_top_drug'] = ag_reports['drug_sold'][0]
+            to_return['ag_reports_no_agrovets'] = agrovets['agrovet_name'].size
+            to_return['ag_reports_agrovets'] = ', '.join(list(agrovets['agrovet_name']))
+            to_return['ag_reports_top_drugs'] = '%s, %s and %s' % (ag_reports['drug_sold'][0], ag_reports['drug_sold'][1], ag_reports['drug_sold'][2])
 
         return to_return
 
     def determine_graphs_period(self, report_date = None):
+        print(report_date)
         try:
             # when called, determine the period to use in generating the graphs
             
             if report_date is None: report_date = dt.datetime.now()
 
             # get the interested complete month
-            self.t_period['fm']['year'] = report_date.year if report_date.month > 0 else report_date.year - 1
+            self.t_period['fm']['year'] = report_date.year if report_date.month > 1 else report_date.year - 1
             self.t_period['fm']['no'] = 12 if report_date.month == 1 else report_date.month-1
             self.t_period['fm']['start'] = dt.date(self.t_period['fm']['year'], self.t_period['fm']['no'], 1)
             self.t_period['fm']['end'] = self.t_period['fm']['start']+relativedelta(months=1, days=-1)
@@ -290,49 +374,43 @@ class GraphsGenerator():
                 if r_type == 'disease_distibution': self.fetch_graph_disease_distibution(period_, specie['species'], file_name_path)
                 elif r_type == 'wordcloud': self.fetch_graph_syndromes_wordcloud(period_, specie['species'], file_name_path)
 
-    def fetch_graph_received_reports(self, period_, file_name_path):
+    def fetch_graph_received_reports(self, period_, file_name_path, return_data=False):
         """
             Fetch, analyse and graph data for the received reports
         """
-        rp_df = pd.DataFrame()
-        rp_df['sub_counties'] = settings.SUB_COUNTIES
+        
+        # total reports received
+        sr_df = pd.DataFrame(list( SyndromicIncidences.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).values('sub_county').annotate(syndromics=Count('sub_county'))))
+        nddetail = pd.DataFrame(list( NDDetail.objects.select_related('nd_report').filter(nd_report__datetime_reported__gte=period_['start']).filter(nd_report__datetime_reported__lte=period_['end']).values('nd_report__sub_county').annotate(nd1=Count('nd_report__sub_county')) ))
+        zeros = pd.DataFrame(list( NDReport.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).filter(nddetail=None).values('sub_county').annotate(zero=Count('sub_county')) ))
 
-        # syndromic records per sub county
-        sr_df = pd.DataFrame(list( SyndromicIncidences.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).values('sub_county').annotate(no_reports=Count('sub_county')) ))
-        if not sr_df.empty:
-            recs = sr_df.set_index('sub_county').T.to_dict('records')[0]
-            rp_df['syndromics'] = [recs[sc] if sc in recs.keys() else 0 for sc in settings.SUB_COUNTIES]
-        
-        else: rp_df['syndromics'] = [0]* len(settings.SUB_COUNTIES)
-        
-        # notifiable records records per sub county
-        nddetail = NDDetail.objects.select_related('nd_report').filter(nd_report__datetime_reported__gte=period_['start']).filter(nd_report__datetime_reported__lte=period_['end']).values('nd_report__sub_county').annotate(no_reports=Count('nd_report__sub_county'))
-        ndr_df = pd.DataFrame(list( nddetail ))
-        if not ndr_df.empty:
-            recs = ndr_df.set_index('nd_report__sub_county').T.to_dict('records')[0]
-            rp_df['nd1'] = [recs[sc] if sc in recs.keys() else 0 for sc in settings.SUB_COUNTIES]
-        
-        else: rp_df['nd1'] = [0]* len(settings.SUB_COUNTIES)
+        empty_df = pd.DataFrame()
+        empty_df['syndromics'] = [0] * len(settings.SUB_COUNTIES)
+        empty_df['nd1'] = [0] * len(settings.SUB_COUNTIES)
+        empty_df['zero'] = [0] * len(settings.SUB_COUNTIES)
+        empty_df['sub_county'] = settings.SUB_COUNTIES
 
-        # zero reports per sub county
-        zeros = NDReport.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).filter(nddetail=None).values('sub_county').annotate(no_reports=Count('sub_county'))
-        zeros_df = pd.DataFrame(list( zeros ))
-        if not zeros_df.empty:
-            recs = zeros_df.set_index('sub_county').T.to_dict('records')[0]
-            rp_df['zero'] = [recs[sc] if sc in recs.keys() else 0 for sc in settings.SUB_COUNTIES]
-            
-        else: rp_df['zero'] = [0]* len(settings.SUB_COUNTIES)
+        if sr_df.empty: sr_df = empty_df
 
-        rp_df['total'] = rp_df.syndromics + rp_df.nd1 + rp_df.zero
-        rp_df.sort_values('total', ascending=False, inplace=True)
-        
+        if not nddetail.empty: sr_df = sr_df.merge(nddetail, how='outer', left_on='sub_county', right_on='nd_report__sub_county', suffixes=('_synd', '_nd1')).fillna(0)
+        else: sr_df = sr_df.merge(empty_df, how='outer', left_on='sub_county', right_on='sub_county', suffixes=('_synd', '_nd1')).fillna(0)
+
+        if not zeros.empty: sr_df = sr_df.merge(zeros, how='outer', left_on='sub_county', right_on='sub_county', suffixes=('', '_zeros')).fillna(0)
+        else: sr_df = sr_df.merge(empty_df, how='outer', left_on='sub_county', right_on='sub_county', suffixes=('', '_zeros')).fillna(0)
+
+        sr_df['total'] = sr_df['syndromics'] + sr_df['nd1'] + sr_df['zero']
+        sr_df.sort_values('total', ascending=False, inplace=True)
+
         data_cols = ['syndromics', 'nd1', 'zero']
         data_labels = ['Syndromic Records', 'Notifiable Diseases', 'Zero Reports']
+        rp_df = sr_df
+        sub_counties_order = list(rp_df.axes[0])
 
         # calculate the %-ages for the data columns
         for i in data_cols:
             rp_df['{}_perc'.format(i)] = rp_df[i] / rp_df['total']
         
+        if return_data: return rp_df
 
         fig, ax = plt.subplots(1, figsize=(12, 8))
         ax.tick_params(labelsize='medium')
@@ -340,7 +418,7 @@ class GraphsGenerator():
         bottom = len(settings.SUB_COUNTIES) * [0]
         for i, col_ in enumerate(data_cols):
             col = '%s_perc' % col_
-            ax.bar(settings.SUB_COUNTIES, rp_df[col_], 0.35, label=data_labels[i], bottom=bottom)
+            ax.bar(rp_df['sub_county'], rp_df[col_], 0.35, label=data_labels[i], bottom=bottom)
             bottom = bottom + rp_df[col_]
 
         ax.set_ylabel('No of Records', fontsize=14)
@@ -354,12 +432,12 @@ class GraphsGenerator():
 
         self.save_graphs(plt, file_name_path)
 
-    def fetch_graph_scvo_reporters(self, period_, file_name_path):
+    def fetch_graph_scvo_reporters(self, period_, file_name_path, return_data=False):
         # fetch and graph data on number of reports per sub county vets
         # This report is critical for morale building, but the data is not yet extracted and saved in the database
         print()
 
-    def fetch_graph_reports_trend(self, period_, file_name_path):
+    def fetch_graph_reports_trend(self, period_, file_name_path, return_data=False):
         # fetch and graph data on the trend of received reports
 
         rp_df = pd.DataFrame()
@@ -401,7 +479,6 @@ class GraphsGenerator():
             rp_df['syndromics'] = [recs[cp] if cp in recs.keys() else 0 for cp in grp_periods]
         
         else: rp_df['syndromics'] = [0]* len(grp_periods)
-
 
         
         # notifiable records records per sub county
@@ -449,6 +526,8 @@ class GraphsGenerator():
         data_cols = ['syndromics', 'nd1', 'zero']
         data_labels = ['Syndromic Records', 'Notifiable Diseases', 'Zero Reports']
 
+        if return_data: return rp_df, grp_periods_name, data_labels
+
         # plot the line graph
         fig, ax = plt.subplots(1, figsize=(12, 8))
         plt.plot(grp_periods, rp_df['total'])
@@ -460,7 +539,7 @@ class GraphsGenerator():
 
         self.save_graphs(plt, file_name_path)
 
-    def fetch_graph_cdr_reporters(self, period_, file_name_path):
+    def fetch_graph_cdr_reporters(self, period_, file_name_path, return_data=False):
         # records per cdr reporter
         sr_df = pd.DataFrame(list( SyndromicIncidences.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).values('reporter').annotate(no_reports=Count('reporter')).order_by('-no_reports') ))
 
@@ -474,6 +553,8 @@ class GraphsGenerator():
         recs = cdr_df.set_index('t_key').T.to_dict('records')[0]
         sr_df['cdr_names'] = [recs[cdr['reporter']] for index, cdr in sr_df.iterrows()]
 
+        if return_data: return sr_df
+
         fig, ax = plt.subplots(1, figsize=(12, 8))
         ax.barh(sr_df['cdr_names'], sr_df['no_reports'], 0.35, label='Most Active CDRs')
         ax.set_ylabel('Community Disease Reporters (CDRs)', labelpad=15)
@@ -485,7 +566,7 @@ class GraphsGenerator():
 
         self.save_graphs(plt, file_name_path)
 
-    def fetch_graph_disease_distibution(self, period_, species, file_name_path):
+    def fetch_graph_disease_distibution(self, period_, species, file_name_path, return_data=False):
         if os.path.exists("%s/%s" % (settings.STATIC_ROOT, file_name_path)): return
         sd_df = pd.DataFrame(list( SyndromicDetails.objects.select_related('incidence').filter(incidence__datetime_reported__gte=period_['start']).filter(incidence__datetime_reported__lte=period_['end']).filter(species=species).values('prov_diagnosis').annotate(no_reports=Count('prov_diagnosis')) ))
         
@@ -505,6 +586,9 @@ class GraphsGenerator():
         new_recs = pd.DataFrame(list(new_recs.items()), columns=['prov_diagnosis', 'counts'])
 
         new_recs.sort_values(by=['counts'], inplace=True)
+
+        if return_data: return new_recs
+
         fig, ax = plt.subplots(figsize=(12, 8))
         if len(new_recs) < 4:
             # draw a pie chart
@@ -528,7 +612,7 @@ class GraphsGenerator():
         fig.tight_layout()
         self.save_graphs(plt, file_name_path)
 
-    def fetch_graph_syndromes_wordcloud(self, period_, species, file_name_path):
+    def fetch_graph_syndromes_wordcloud(self, period_, species, file_name_path, return_data=False):
         if os.path.exists("%s/%s" % (settings.STATIC_ROOT, file_name_path)): return
         sd = SyndromicDetails.objects.select_related('incidence').filter(incidence__datetime_reported__gte=period_['start']).filter(incidence__datetime_reported__lte=period_['end']).filter(species=species).values('clinical_signs')
 
@@ -555,13 +639,15 @@ class GraphsGenerator():
         
         self.save_graphs(plt, file_name_path)
 
-    def fetch_graph_n_diseases(self, period_, file_name_path):
+    def fetch_graph_n_diseases(self, period_, file_name_path, return_data=False):
         nd_df = pd.DataFrame(list( NDDetail.objects.select_related('nd_report').filter(nd_report__datetime_reported__gte=period_['start']).filter(nd_report__datetime_reported__lte=period_['end']).values('disease').annotate(no_reports=Count('disease')).order_by('-no_reports') ))
 
-        if not nd_df.empty:
-            nd_df = nd_df[::-1]
-            fig, ax = plt.subplots(figsize=(12, 8))
+        nd_df = nd_df[::-1]
+        if return_data: return nd_df
 
+        if not nd_df.empty:
+            
+            fig, ax = plt.subplots(figsize=(12, 8))
             ax.barh(nd_df['disease'], nd_df['no_reports'], 0.35, label='Notifiable Diseases')
             ax.set_xlabel('No of Reports')
             ax.set_title('Reported Notifiable Diseases during %s' % period_['period_name'])
@@ -574,10 +660,12 @@ class GraphsGenerator():
 
         self.save_graphs(plt, file_name_path)
 
-    def fetch_graph_abattoirs_reporters(self, period_, file_name_path):
+    def fetch_graph_abattoirs_reporters(self, period_, file_name_path, return_data=False):
         sh_reporters = pd.DataFrame(list( SHReport.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).values('reporter').annotate(no_reports=Count('reporter')).order_by('-no_reports') ))
 
         if sh_reporters.empty:
+            if return_data: return pd.DataFrame(), []
+
             plt.text(0.1, 0.5, 'Slaughter house data was not submitted for %s' % period_['period_name'], fontsize=10, color='red')
         
         else:
@@ -590,6 +678,8 @@ class GraphsGenerator():
                 recs = reporters_df.set_index('t_key').T.to_dict('records')[0]
                 reporter_names = [recs[reporter['reporter']] for index, reporter in reporters_df.iterrows()]
 
+            if return_data: return sh_reporters, reporter_names
+
             fig, ax = plt.subplots(1, figsize=(12, 8))
             ax.bar(reporter_names, sh_reporters['no_reports'], 0.35, label='Reporters')
             ax.set_ylabel('No of Reports')
@@ -600,19 +690,21 @@ class GraphsGenerator():
             
         self.save_graphs(plt, file_name_path)
 
-    def fetch_graph_abattoirs_reports(self, period_, file_name_path):
+    def fetch_graph_abattoirs_reports(self, period_, file_name_path, return_data=False):
         # get the abattoirs and species
         all_species = pd.DataFrame(list(SHSpecies.objects.select_related('sh_report').filter(sh_report__datetime_reported__gte=period_['start']).filter(sh_report__datetime_reported__lte=period_['end']).values('specie').distinct('specie')))
-        all_abattoirs = pd.DataFrame(list(SHReport.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).values('abattoir').distinct('abattoir')))
+        all_abattoirs = pd.DataFrame(list(SHReport.objects.values('abattoir').distinct('abattoir')))
 
         sh_records = pd.DataFrame(list( SHSpecies.objects.select_related('sh_report').filter(sh_report__datetime_reported__gte=period_['start']).filter(sh_report__datetime_reported__lte=period_['end']).values('sh_report__abattoir', 'specie').annotate(no_reports=Sum('no_slaughtered')).order_by('sh_report__abattoir', 'specie') ))
 
         if sh_records.empty:
+            if return_data: return pd.DataFrame(), [], []
             plt.text(0.1, 0.5, 'Slaughter house data was not submitted for %s' % period_['period_name'], fontsize=10, color='red')
         
         else:
-            sh_df = pd.pivot_table(sh_records, values='no_reports', columns=['specie'], index=['sh_report__abattoir'], aggfunc=np.sum, fill_value=0)
+            sh_df = pd.pivot_table(sh_records, values='no_reports', columns=['specie'], index=['sh_report__abattoir'], aggfunc=np.sum, fill_value=0, margins=True).sort_values('All', ascending=False).sort_values('All', ascending=False, axis=1).drop('All').drop('All', axis=1)
             species_ = list(sh_df.keys())
+            all_abattoirs_ = list(sh_df.index)
             sh_df['total'] = sh_df.sum(axis=1)
 
             sh_df.sort_values('total', ascending=False, inplace=True)
@@ -620,11 +712,13 @@ class GraphsGenerator():
             # calculate the %-ages for the data columns
             for i in species_: sh_df['{}_perc'.format(i)] = sh_df[i] / sh_df['total']
 
+            if return_data: return sh_df, species_, all_abattoirs_
+
             fig, ax = plt.subplots(1, figsize=(12, 8))
-            bottom = len(all_abattoirs) * [0]
+            bottom = len(all_abattoirs_) * [0]
             for i, col_ in enumerate(species_):
                 col = '%s_perc' % col_
-                ax.bar(all_abattoirs['abattoir'], sh_df[col_], 0.35, label=species_[i], bottom=bottom)
+                ax.bar(all_abattoirs_, sh_df[col_], 0.35, label=species_[i], bottom=bottom)
                 bottom = bottom + sh_df[col_]
 
             ax.set_xlabel('Slaughter Houses')
@@ -638,11 +732,12 @@ class GraphsGenerator():
 
         self.save_graphs(plt, file_name_path)
 
-    def fetch_graph_abattoir_lesions(self, period_, file_name_path):
+    def fetch_graph_abattoir_lesions(self, period_, file_name_path, return_data=False):
         all_species = pd.DataFrame(list(SHSpecies.objects.select_related('sh_report').filter(sh_report__datetime_reported__gte=period_['start']).filter(sh_report__datetime_reported__lte=period_['end']).values('specie').distinct('specie')))
         sh_lesions = pd.DataFrame(list( SHParts.objects.select_related('sh_specie', 'sh_report').filter(sh_specie__sh_report__datetime_reported__gte=period_['start']).filter(sh_specie__sh_report__datetime_reported__lte=period_['end']).values('lesions', 'sh_specie__specie').annotate(no_lesions=Sum('no_condemned')).order_by('lesions', 'sh_specie__specie') ))
 
         if sh_lesions.empty:
+            if return_data: return pd.DataFrame()
             plt.text(0.1, 0.5, 'Slaughter house data was not submitted for %s' % period_['period_name'], fontsize=10, color='red')
         
         else:
@@ -655,6 +750,8 @@ class GraphsGenerator():
             recs = lesions_df.set_index('t_key').T.to_dict('records')[0]
             lesion_names = [recs[ls] for ls in list(sh_lesions.axes[0])]
             sh_lesions['lesion_name'] = lesion_names
+
+            if return_data: return sh_lesions
 
             fig, ax = plt.subplots(1, figsize=(12, 8))
             left_w = np.arange(len(lesion_names))
@@ -676,16 +773,18 @@ class GraphsGenerator():
 
         self.save_graphs(plt, file_name_path)
 
-    def fetch_graph_drugs_sold(self, period_, file_name_path):
+    def fetch_graph_drugs_sold(self, period_, file_name_path, return_data=False):
         ag_df = pd.DataFrame(list( AGDetail.objects.select_related('ag_report').filter(ag_report__datetime_reported__gte=period_['start']).filter(ag_report__datetime_reported__lte=period_['end']).values('drug_sold').annotate(no_drugs=Count('drug_sold')).order_by('-no_drugs') ))
 
         if ag_df.empty:
+            if return_data: return pd.DataFrame()
             plt.text(0.1, 0.5, 'There were no agrovet records submitted for %s' % period_['period_name'], fontsize=10, color='red')
         
         else:
             ag_df = ag_df[::-1]
-            fig, ax = plt.subplots(figsize=(12, 8))
+            if return_data: return ag_df
 
+            fig, ax = plt.subplots(figsize=(12, 8))
             ax.barh(ag_df['drug_sold'], ag_df['no_drugs'], 0.35, label='Drugs')
             ax.set_xlabel('No of drugs sold')
             ax.set_title('Drugs sold during %s' % period_['period_name'])
@@ -695,7 +794,7 @@ class GraphsGenerator():
 
         self.save_graphs(plt, file_name_path)
 
-    def fetch_graph_drug_sale_location(self, period_, file_name_path):
+    def fetch_graph_drug_sale_location(self, period_, file_name_path, return_data=False):
         ag_df = pd.DataFrame(list( AGDetail.objects.select_related('ag_report').filter(ag_report__datetime_reported__gte=period_['start']).filter(ag_report__datetime_reported__lte=period_['end']).values('drug_sold', 'farmer_location').annotate(no_drugs=Count('drug_sold')).order_by('drug_sold', 'farmer_location') ))
 
         if ag_df.empty:
@@ -709,6 +808,8 @@ class GraphsGenerator():
             locations_df = pd.DataFrame(list(DictionaryItems.objects.filter(t_key__in=list(ag_df.axes[0])).values('t_key', 't_value').distinct('t_key')))
             recs = locations_df.set_index('t_key').T.to_dict('records')[0]
             locations_names = [recs[lns] for lns in list(ag_df.axes[0])]
+
+            if return_data: return drugs_sold, locations_names, drugs_sold
 
             fig, ax = plt.subplots(figsize=(9, 12))
             im = ax.imshow(drugs_sold)
