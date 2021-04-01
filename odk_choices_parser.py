@@ -15,7 +15,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from raven import Client
 
 from .terminal_output import Terminal
-from .models import Recipients, DictionaryItems, SubCounty, Ward, Village
+from .models import Recipients, DictionaryItems, SubCounty, Ward, Village, RawSubmissions, SyndromicIncidences
 
 terminal = Terminal()
 sentry = Client(settings.SENTRY_DSN)
@@ -165,9 +165,9 @@ class ImportODKChoices():
             village = None
             sub_county = None
             try:
-                if pers_type is 'cdr':
+                if pers_type == 'cdr':
                     village = Village.objects.filter(nick_name=pers['cdr_village'].strip()).get()
-                elif pers_type is 'enumerator':
+                elif pers_type == 'enumerator':
                     sub_county = SubCounty.objects.filter(nick_name=pers['enumerator_subcounty']).get()
                 else:
                     sub_county = None
@@ -255,7 +255,7 @@ class ImportODKChoices():
     def format_phone_number(self, phone_number):
         """Given a phone number, format it to include the country code
         """
-        if phone_number is '':
+        if phone_number == '':
             return None
         elif re.search('^7(\d{8})$', phone_number) is not None:
             return '+2547%s' % re.split('^7(\d{8})$', phone_number)[1:2][0]
@@ -267,3 +267,27 @@ class ImportODKChoices():
             return phone_number
         else:
             raise ValueError("Encountered a phone number '%s' of unknown format" % phone_number)
+
+
+
+class UpdateDatabase():
+    def __init__(self):
+        self.module_name = 'Updating database'
+
+    def update_syndromic_submitter(self):
+        # updates the details of the person who submitted the syndromic details
+        submissions_2_update = SyndromicIncidences.objects.filter(scvo_reporter='not_set').all()
+
+        updated = 0
+        for subm in submissions_2_update:
+            # get the raw submission for this record
+            raw_subm = RawSubmissions.objects.filter(uuid=subm.uuid).values('raw_data', 'id').get()       # we must have the raw submission with this uuid, else we are in shit
+
+            print('Updating %s ..' % subm.uuid)
+            subm.scvo_reporter = raw_subm['raw_data']['s1q4_enum']
+            subm.publish()
+            
+            updated = updated + 1
+            
+        
+        print('Updated %d records' % updated)

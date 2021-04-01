@@ -186,6 +186,7 @@ class SyndromicIncidences(BaseTable):
     ward = models.CharField(max_length=50, null=True)
     village = models.CharField(max_length=50, null=True)
     reporter = models.CharField(max_length=50)
+    scvo_reporter = models.CharField(max_length=50, null=False, blank=False, default='not_set')
     latitude = models.DecimalField(max_digits=11, decimal_places=9)
     longitude = models.DecimalField(max_digits=12, decimal_places=9)
     accuracy = models.DecimalField(max_digits=7, decimal_places=1)
