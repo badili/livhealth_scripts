@@ -87,7 +87,7 @@ def report_wrapper(request, hashid):
 
 class GraphsGenerator():
     # the graphs that we are going to generate
-    graph_names = ['reports', 'scvo_reporters', 'reports_trend', 'cdr_reporters', 'disease_distibution', 'wordcloud', 'n_diseases', 'abattoirs_reporters', 'abattoirs', 'abattoir_lesions', 'drugs_sold', 'drug_sale_location']
+    graph_names = ['reports', 'scvo_reporters', 'reports_trend', 'cdr_reporters', 'disease_distibution', 'wordcloud', 'n_diseases', 'abattoirs_reporters', 'abattoirs', 'abattoir_lesions', 'agrovet_records', 'drugs_sold', 'drug_sale_location']
 
     """
         graph periods coding
@@ -221,6 +221,11 @@ class GraphsGenerator():
         sr_df = self.fetch_graph_cdr_reporters(period_, 'dummy_file_path', True)
         to_return['cdr_highest'] = sr_df['cdr_names'][0]
         to_return['cdr_highest_reports'] = sr_df['no_reports'][0]
+
+        # SCVOs
+        scvo_df, scvo_reporters = self.fetch_graph_scvo_reporters(period_, 'dummy_file_path', True)
+        to_return['rec_scvo_reporter'] = scvo_reporters[0]
+        to_return['rec_scvo_sum'] = scvo_df['no_reports'][0]
 
         # notifiable diseases
         nd_df = self.fetch_graph_n_diseases(period_, 'dummy_file_path', True)
@@ -364,6 +369,7 @@ class GraphsGenerator():
         elif r_type == 'abattoir_lesions': self.fetch_graph_abattoir_lesions(period_, file_name_path)
         elif r_type == 'drugs_sold': self.fetch_graph_drugs_sold(period_, file_name_path)
         elif r_type == 'drug_sale_location': self.fetch_graph_drug_sale_location(period_, file_name_path)
+        elif r_type == 'agrovet_records': self.fetch_graph_agrovet_records(period_, file_name_path)
         elif r_type == 'disease_distibution' or r_type == 'wordcloud':
             # get the species in this period
             all_species = list(SyndromicDetails.objects.select_related('incidence').filter(incidence__datetime_reported__gte=period_['start']).filter(incidence__datetime_reported__lte=period_['end']).values('species').distinct('species'))
@@ -433,9 +439,35 @@ class GraphsGenerator():
         self.save_graphs(plt, file_name_path)
 
     def fetch_graph_scvo_reporters(self, period_, file_name_path, return_data=False):
-        # fetch and graph data on number of reports per sub county vets
-        # This report is critical for morale building, but the data is not yet extracted and saved in the database
-        print()
+        scvo_reporters = pd.DataFrame(list( SyndromicIncidences.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).values('scvo_reporter').annotate(no_reports=Count('scvo_reporter')).order_by('-no_reports') ))
+
+        if scvo_reporters.empty:
+            if return_data: return pd.DataFrame(), []
+
+            plt.text(0.1, 0.5, 'There were no reports submitted for disease surveillance in %s' % period_['period_name'], fontsize=10, color='red')
+        
+        else:
+            # get the actual names of the reporters
+            reporters = scvo_reporters['scvo_reporter']
+            reporters_df = pd.DataFrame(list(DictionaryItems.objects.filter(t_key__in=reporters).values('t_key', 't_value').distinct('t_key')))
+            if reporters_df.empty: reporter_names = reporters
+            else:
+                recs = reporters_df.set_index('t_key').T.to_dict('records')[0]
+                reporter_names = [recs[scvo_reporter] for scvo_reporter in reporters]
+
+            if return_data: return scvo_reporters, reporter_names
+
+            scvo_reporters = scvo_reporters[::-1]
+            fig, ax = plt.subplots(1, figsize=(12, 8))
+            ax.barh(reporter_names, scvo_reporters['no_reports'], 0.35, label='Reporters')
+            ax.set_xlabel('No of Reports')
+            ax.set_title('SCVOs Reporting in %s' % period_['period_name'])
+            ax.xaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
+            plt.xlim(auto=True)
+            # plt.setp(ax.get_xticklabels(), rotation=90, ha="right", rotation_mode="anchor")
+            fig.tight_layout()
+            
+        self.save_graphs(plt, file_name_path)
 
     def fetch_graph_reports_trend(self, period_, file_name_path, return_data=False):
         # fetch and graph data on the trend of received reports
@@ -773,6 +805,24 @@ class GraphsGenerator():
 
         self.save_graphs(plt, file_name_path)
 
+    def fetch_graph_agrovet_records(self, period_, file_name_path, return_data=False):
+        ag_rec = pd.DataFrame(list( AGReport.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).values('agrovet_name').annotate(no_reports=Count('agrovet_name')).order_by('-no_reports') ))
+
+        if ag_rec.empty:
+            if return_data: return pd.DataFrame()
+            plt.text(0.1, 0.5, 'There were no agrovet records submitted in %s' % period_['period_name'], fontsize=10, color='red')
+
+        else:
+            # draw a pie chart
+            fig, ax = plt.subplots(figsize=(7, 5))
+            wedges, texts, autotexts = ax.pie(ag_rec['no_reports'], labels=ag_rec['agrovet_name'], autopct='%1.1f%%', shadow=False, startangle=90)
+            ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
+            ax.set_title('Reporting Agrovets in %s' % period_['period_name'])
+            ax.legend(wedges, ag_rec['agrovet_name'], title="Agrovets", loc="center left", bbox_to_anchor=(1, 0, 0.5, 1))
+            fig.tight_layout()
+
+        self.save_graphs(plt, file_name_path)
+
     def fetch_graph_drugs_sold(self, period_, file_name_path, return_data=False):
         ag_df = pd.DataFrame(list( AGDetail.objects.select_related('ag_report').filter(ag_report__datetime_reported__gte=period_['start']).filter(ag_report__datetime_reported__lte=period_['end']).values('drug_sold').annotate(no_drugs=Count('drug_sold')).order_by('-no_drugs') ))
 
@@ -838,5 +888,5 @@ class GraphsGenerator():
 def generate_report_graphs():
     grapher = GraphsGenerator()
 
-    grapher.determine_graphs_period()
+    grapher.determine_graphs_period(dt.date(2021,3, 31))
     grapher.generate_graphs()
