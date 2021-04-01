@@ -10,13 +10,16 @@ import pytz
 import random
 import json
 
+from dateutil.relativedelta import relativedelta
 from datetime import date
 from django.conf import settings
 from django.contrib.auth.hashers import make_password
+from django.core.mail import EmailMultiAlternatives
 from django.db import transaction, connection
 from django.db.models import Q, Sum, Count, IntegerField, Min, Max, Avg
 from django.forms.models import model_to_dict
 from django.utils import timezone
+from django.template.loader import render_to_string
 from raven import Client
 
 from jinja2 import Template, FileSystemLoader
@@ -25,11 +28,14 @@ from jinja2.environment import Environment
 try:
     if re.match('.+LivHealth', settings.SITE_NAME):
         # try importing stuff from LivHealth
+        from hashids import Hashids
         from .terminal_output import Terminal
         from .models import SMSQueue, MessageTemplates, Recipients, Campaign, SubCounty, Ward, Village
         from .serializers import RecepientSerializer
         from .odk_forms import OdkForms
         from .odk_choices_parser import ImportODKChoices
+        my_hashids = Hashids(min_length=5, salt=settings.SECRET_KEY)
+
     elif settings.SITE_NAME == 'Pazuri Records':
         # try importing stuff from PazuriPoultry
         from vendor.terminal_output import Terminal
@@ -818,6 +824,67 @@ class Notification():
             sentry.captureException()
             raise Exception(str(e))
 
+    def send_periodic_reports(self):
+        # send report links of the previous periods
+        try:
+            livhealth_admins = Recipients.objects.filter(designation='livhealth_admin').exclude(recipient_email__isnull=True).exclude(recipient_email__exact='').all()
+            recipients = []
+            for admn in livhealth_admins:
+                recipients.append(admn.recipient_email)
+
+            # determine the period of the reports
+            today = datetime.datetime.now()
+            current_month = today.strftime('%B')
+
+            reports = []
+
+            # monthly report
+            lm = today + relativedelta(months=-1)
+            reports.append( ["%s of %d" % (lm.strftime('%B'), lm.year), my_hashids.encode(lm.year, lm.month)] )
+
+            if today.month % 3 == 1:
+                # we need a quarter report
+                if today.month // 3 == 0: reports.append( ["Quarter 4 of %d" % (today.year-1), my_hashids.encode(today.year-1, 16)] )
+                else: reports.append( ["Quarter %d of %d" % (today.month//3, today.year), my_hashids.encode(today.year, 12 + (today.month//3) )] )
+
+            if today.month % 6 == 1:
+                # we need a half year report
+                if today.month // 6 == 0: reports.append( ["2nd Half of %d" % (today.year-1), my_hashids.encode(today.year-1, 18)] )
+                else: reports.append( ["1st Half of %d" % today.year, my_hashids.encode(today.year, 17)] )
+
+            if today.month == 1:
+                # get the last year report
+                reports.append( ["Year %d" % (today.year-1), my_hashids.encode(today.year-1, 0)] )
+
+            plain_message = ""
+            email_message = ""
+            email_message_inner_template = """
+            <p>
+                <mj-text font-family="arial" font-size="16px" align="left" color="#808080"> <span style="color:#0098CE"><b><a href='%s'>%s</a></b></span></mj-text>
+            </p>
+            """
+
+            for rep in reports:
+                cur_url = "%s/reports/%s" % (settings.LIVHEALTH_URL, rep[1])
+
+                plain_message = "%s\n%s" % ( plain_message, "%s: %s" % (rep[0], cur_url) )
+                email_message = "%s%s" % (email_message, email_message_inner_template % (cur_url, rep[0]) )
+
+            if settings.DEBUG: recipients = ['wangoru.kihara@badili.co.ke']
+
+            text_content = render_to_string('email-periodic-reports.txt', { 'message_details': plain_message, 'current_month': current_month })
+            html_content = render_to_string('email-periodic-reports.html', {'message_details': email_message, 'current_month': current_month })
+            email_subject = '[%s] Periodic Reports for %s %s' % (settings.SITE_NAME, current_month, today.strftime('%Y'))
+
+            msg = EmailMultiAlternatives(email_subject, text_content, settings.DEFAULT_FROM_EMAIL, recipients)
+            msg.attach_alternative(html_content, "text/html")
+            msg.send()
+
+        except Exception as e:
+            if settings.DEBUG: terminal.tprint(str(e), 'fail')
+            sentry.captureException()
+            raise Exception(str(e))
+
 
 class PazuriNotification():
     def __init__(self, cur_user_email=None):
@@ -1359,5 +1426,6 @@ class ChurchRegisterNotification():
     def __init__(self, cur_user_email=None):
         self.time_formats = ['now', 'today', 'tomorrow', 'yesterday']
         self.at_ok_sending_status_codes = [100, 101, 102]
+
 
 

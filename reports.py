@@ -44,7 +44,7 @@ def report_wrapper(request, hashid):
 
         if os.path.exists("%s/reports/%s" % (settings.STATIC_ROOT, filename_)) and request.GET.get('as', '') != 'html':
             # we have the report already generated, just return the pdf
-            print('Serving the saved file...')
+            if settings.DEBUG: print('Serving the saved file...')
 
             full_filename_path = "%s/reports/%s" % (settings.STATIC_ROOT, filename_)
             wrapper = FileWrapper(open(full_filename_path, 'rb'))
@@ -53,10 +53,10 @@ def report_wrapper(request, hashid):
             response['Content-Length'] = os.path.getsize(full_filename_path)
             return response
         
-        print('Ok, gotta generate this pdf (%s) ....' % filename_)
+        if settings.DEBUG: print('Ok, gotta generate this pdf (%s) ....' % filename_)
 
         # get the period date details
-        grapher.determine_graphs_period(report_details['first_date'])
+        grapher.determine_graphs_period(report_details['report_ran_date'])
         period_ = grapher.t_period[report_details['period_code']]
         
         report_details['extras'], report_details['extra_info'], report_details['graphs'] = grapher.report_extra_details(period_)
@@ -136,7 +136,7 @@ class GraphsGenerator():
     }
 
     def __init__(self):
-        print('Silence is golden')
+        if settings.DEBUG: print('Silence is golden')
 
     def report_details(self, hashid):
         """
@@ -145,6 +145,7 @@ class GraphsGenerator():
         """
 
         decoded = my_hashids.decode(hashid)
+        print(decoded)
         # print(my_hashids.encode(2020, 0))
         g_year = decoded[0]
         g_period = decoded[1] if len(decoded) == 2 else None
@@ -163,7 +164,7 @@ class GraphsGenerator():
             report_period = g_year
             report_details['period_type'] = 'year'
             report_details['report_template'] = 'reports/monthly_report.html'
-            report_details['first_date'] = dt.date(g_year + 1, 1, 1)            # for us to get the requested year, ran the reports with Jan-01-NextYear as the requested date
+            report_details['report_ran_date'] = dt.date(g_year + 1, 1, 1)            # for us to get the requested year, ran the reports with Jan-01-NextYear as the requested date
             report_details['period_code'] = 'fy'
 
         elif g_period < 13:
@@ -171,8 +172,8 @@ class GraphsGenerator():
             report_period = dt.date(g_year, g_period, 1).strftime("%B")
             report_details['period_type'] = 'Month'
             report_details['report_template'] = 'reports/monthly_report.html'
-            if g_period == 12: report_details['first_date'] = dt.date(g_year + 1, 1, 1)
-            else: report_details['first_date'] = dt.date(g_year, g_period + 1, 1)
+            if g_period == 12: report_details['report_ran_date'] = dt.date(g_year + 1, 1, 1)
+            else: report_details['report_ran_date'] = dt.date(g_year, g_period + 1, 1)
             report_details['period_code'] = 'fm'
 
         elif g_period < 17:
@@ -180,24 +181,24 @@ class GraphsGenerator():
             report_period = 'Quarter %d,' % (g_period - 12)
             report_details['period_type'] = 'Quarter'
             report_details['report_template'] = 'reports/monthly_report.html'
-            if g_period == 16: report_details['first_date'] = dt.date(g_year + 1, 1, 1)
-            else: report_details['first_date'] = dt.date(g_year, ((g_period - 12) * 3) - 2, 1)
+            if g_period == 16: report_details['report_ran_date'] = dt.date(g_year + 1, 1, 1)
+            else: report_details['report_ran_date'] = dt.date(g_year, ((g_period - 12) * 3) + 1, 1)
             report_details['period_code'] = 'fq'
 
         else:
             report_period = '%d Half of ' % (g_period - 16)
             report_details['period_type'] = 'Half Year'
             report_details['report_template'] = 'reports/monthly_report.html'
-            if g_period == 18: report_details['first_date'] = dt.date(g_year + 1, 1, 1)
-            else: report_details['first_date'] = dt.date(g_year, ((g_period - 16) * 6) - 5, 1)
+            if g_period == 18: report_details['report_ran_date'] = dt.date(g_year + 1, 1, 1)
+            else: report_details['report_ran_date'] = dt.date(g_year, ((g_period - 16) * 6) + 1, 1)
             report_details['period_code'] = 'fh'
 
-        report_details['period'] = '%s %s' % (report_period, g_year)
-        report_details['period_name'] = report_period
+        report_details['period_name'] = '%s %s' % (report_period, g_year)
 
         return report_details
 
     def report_extra_details(self, period_):
+        if settings.DEBUG: print(period_)
         # get the additional details for this report
         to_return = {}
         
@@ -305,7 +306,7 @@ class GraphsGenerator():
         return to_return, extra_info, graphs
 
     def determine_graphs_period(self, report_date = None):
-        print(report_date)
+        if settings.DEBUG: print(report_date)
         try:
             # when called, determine the period to use in generating the graphs
             
@@ -345,7 +346,7 @@ class GraphsGenerator():
             self.t_period['fy']['gid'] = 0
             self.t_period['fy']['period_name'] = self.t_period['fy']['year']
 
-            print(self.t_period)
+            if settings.DEBUG: print(self.t_period)
 
         except Exception as e:
             if settings.DEBUG: terminal.tprint(str(e), 'fail')
@@ -367,7 +368,7 @@ class GraphsGenerator():
 
                     except:
                         # Not found
-                        print("Generate the '%s' report for %s%s" % (r_type, period_['year'], '' if key_ == 'fy' else '_%s%d' % (key_, period_['no'])) )
+                        if settings.DEBUG: print("Generate the '%s' report for %s%s" % (r_type, period_['year'], '' if key_ == 'fy' else '_%s%d' % (key_, period_['no'])) )
                         self.fetch_graph_reports(period_, r_type, file_name_path)
 
         except Exception as e:
@@ -419,19 +420,24 @@ class GraphsGenerator():
         nddetail = pd.DataFrame(list( NDDetail.objects.select_related('nd_report').filter(nd_report__datetime_reported__gte=period_['start']).filter(nd_report__datetime_reported__lte=period_['end']).values('nd_report__sub_county').annotate(nd1=Count('nd_report__sub_county')) ))
         zeros = pd.DataFrame(list( NDReport.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).filter(nddetail=None).values('sub_county').annotate(zero=Count('sub_county')) ))
 
-        empty_df = pd.DataFrame()
-        empty_df['syndromics'] = [0] * len(settings.SUB_COUNTIES)
-        empty_df['nd1'] = [0] * len(settings.SUB_COUNTIES)
-        empty_df['zero'] = [0] * len(settings.SUB_COUNTIES)
-        empty_df['sub_county'] = settings.SUB_COUNTIES
-
-        if sr_df.empty: sr_df = empty_df
+        if sr_df.empty:
+            empty_df = pd.DataFrame()
+            empty_df['sub_county'] = settings.SUB_COUNTIES
+            empty_df['syndromics'] = [0] * len(settings.SUB_COUNTIES)
 
         if not nddetail.empty: sr_df = sr_df.merge(nddetail, how='outer', left_on='sub_county', right_on='nd_report__sub_county', suffixes=('_synd', '_nd1')).fillna(0)
-        else: sr_df = sr_df.merge(empty_df, how='outer', left_on='sub_county', right_on='sub_county', suffixes=('_synd', '_nd1')).fillna(0)
+        else:
+            empty_df = pd.DataFrame()
+            empty_df['sub_county'] = settings.SUB_COUNTIES
+            empty_df['nd1'] = [0] * len(settings.SUB_COUNTIES)
+            sr_df = sr_df.merge(empty_df, how='outer', left_on='sub_county', right_on='sub_county', suffixes=('_synd', '_nd1')).fillna(0)
 
         if not zeros.empty: sr_df = sr_df.merge(zeros, how='outer', left_on='sub_county', right_on='sub_county', suffixes=('', '_zeros')).fillna(0)
-        else: sr_df = sr_df.merge(empty_df, how='outer', left_on='sub_county', right_on='sub_county', suffixes=('', '_zeros')).fillna(0)
+        else:
+            empty_df = pd.DataFrame()
+            empty_df['sub_county'] = settings.SUB_COUNTIES
+            empty_df['zero'] = [0] * len(settings.SUB_COUNTIES)
+            sr_df = sr_df.merge(empty_df, how='outer', left_on='sub_county', right_on='sub_county', suffixes=('', '_zeros')).fillna(0)
 
         sr_df['total'] = sr_df['syndromics'] + sr_df['nd1'] + sr_df['zero']
         sr_df.sort_values('total', ascending=False, inplace=True)
@@ -487,6 +493,8 @@ class GraphsGenerator():
             if return_data: return scvo_reporters, reporter_names
 
             scvo_reporters = scvo_reporters[::-1]
+            reporter_names = reporter_names[::-1]
+
             fig, ax = plt.subplots(1, figsize=(12, 8))
             ax.barh(reporter_names, scvo_reporters['no_reports'], 0.35, label='Reporters')
             ax.set_xlabel('No of Reports')
@@ -515,7 +523,7 @@ class GraphsGenerator():
             si = SyndromicIncidences.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).annotate(grp_period=RawSQL('DATE(datetime_reported)', []) ).values('grp_period').annotate(no_reports=Count('grp_period')).order_by('grp_period')
             dates_ = []
             dates_.extend(range(1, monthrange(period_['year'], period_['gid'])[1] + 1))
-            grp_periods = [dt.datetime(2020, 2, x).strftime('%d') for x in dates_]
+            grp_periods = [dt.datetime(period_['year'], period_['gid'], x).strftime('%d') for x in dates_]
             grp_periods_name = 'Dates'
         else:
             si = SyndromicIncidences.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).annotate(grp_period=RawSQL('EXTRACT(WEEK FROM datetime_reported)', []) ).values('grp_period').annotate(no_reports=Count('grp_period')).order_by('grp_period')
@@ -917,5 +925,5 @@ class GraphsGenerator():
 def generate_report_graphs():
     grapher = GraphsGenerator()
 
-    grapher.determine_graphs_period(dt.date(2021,3, 31))
+    grapher.determine_graphs_period()
     grapher.generate_graphs()
