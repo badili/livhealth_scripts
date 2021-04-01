@@ -16,9 +16,11 @@ from django.db import transaction
 from django.db.models import Q, Sum, Count, IntegerField, Min, Max, Avg, F
 from django.db.models.expressions import RawSQL
 from django.conf import settings
+from django.http import HttpResponse
 from django.utils import timezone
 from django.views.generic import TemplateView
 from calendar import monthrange
+from wsgiref.util import FileWrapper
 
 from wkhtmltopdf.views import PDFTemplateResponse, PDFTemplateView
 from wordcloud import (WordCloud, get_single_color_func)
@@ -38,10 +40,29 @@ def report_wrapper(request, hashid):
     try:
         grapher = GraphsGenerator()
         report_details = grapher.report_details(hashid)
+        filename_ = '%s for %s.pdf' % (report_details['title'], report_details['period_name'])
+
+        if os.path.exists("%s/reports/%s" % (settings.STATIC_ROOT, filename_)) and request.GET.get('as', '') != 'html':
+            # we have the report already generated, just return the pdf
+            print('Serving the saved file...')
+
+            full_filename_path = "%s/reports/%s" % (settings.STATIC_ROOT, filename_)
+            wrapper = FileWrapper(open(full_filename_path, 'rb'))
+            response = HttpResponse(wrapper, content_type='application/pdf')
+            response['Content-Disposition'] = 'attachment; filename=%s' % os.path.basename(filename_)
+            response['Content-Length'] = os.path.getsize(full_filename_path)
+            return response
         
-        filename_ = '%s for %s.pdf' % (report_details['title'], report_details['period'])
+        print('Ok, gotta generate this pdf (%s) ....' % filename_)
+
+        # get the period date details
+        grapher.determine_graphs_period(report_details['first_date'])
+        period_ = grapher.t_period[report_details['period_code']]
+        
+        report_details['extras'], report_details['extra_info'], report_details['graphs'] = grapher.report_extra_details(period_)
+        
+        # prepare to generate the pdf report
         template_name_ = report_details['report_template']
-        
         header_template_ = 'reports/header.html'
         footer_template_ = 'reports/footer.html'
         cmd_options_ = {
@@ -78,11 +99,23 @@ def report_wrapper(request, hashid):
 
             return context
         
-        
-    return ReportView.as_view()(request)
-    # request=request, filename=filename_, cmd_options={'disable-javascript': False}, template_name=template_name_, context=context
-    # context = RequestContext(request)    
-    # return PDFTemplateView.as_view()(request=request, template_name=template_name_)
+    
+    response = ReportView.as_view()(request)
+    if request.GET.get('as', '') == 'html':
+        return response
+    
+    file_name_path = "reports/%s" % ( filename_ )
+    if settings.USE_S3 == 'True':
+        # push it to s3
+        client = boto3.client('s3', region_name=settings.AWS_S3_REGION_NAME)
+        img_name = '%s.png' % access_code
+        img.save(img_name)
+        client.upload_file(img_name, settings.AWS_STORAGE_BUCKET_NAME, 'static/qr_codes/%s' % img_name, ExtraArgs={'ACL':'public-read'})
+    else:
+        with open("%s/%s" % (settings.STATIC_ROOT, file_name_path), "wb") as f:
+            f.write(response.rendered_content)
+
+    return response
 
 
 class GraphsGenerator():
@@ -125,14 +158,13 @@ class GraphsGenerator():
             'highest_no_reports': 'yy'
         }
 
-        period_code = None
         if g_period == 0:
             # interested in years
             report_period = g_year
             report_details['period_type'] = 'year'
             report_details['report_template'] = 'reports/monthly_report.html'
             report_details['first_date'] = dt.date(g_year + 1, 1, 1)            # for us to get the requested year, ran the reports with Jan-01-NextYear as the requested date
-            period_code = 'fy'
+            report_details['period_code'] = 'fy'
 
         elif g_period < 13:
             # interested in months
@@ -141,7 +173,7 @@ class GraphsGenerator():
             report_details['report_template'] = 'reports/monthly_report.html'
             if g_period == 12: report_details['first_date'] = dt.date(g_year + 1, 1, 1)
             else: report_details['first_date'] = dt.date(g_year, g_period + 1, 1)
-            period_code = 'fm'
+            report_details['period_code'] = 'fm'
 
         elif g_period < 17:
             # interested in quarters
@@ -150,7 +182,7 @@ class GraphsGenerator():
             report_details['report_template'] = 'reports/monthly_report.html'
             if g_period == 16: report_details['first_date'] = dt.date(g_year + 1, 1, 1)
             else: report_details['first_date'] = dt.date(g_year, ((g_period - 12) * 3) - 2, 1)
-            period_code = 'fq'
+            report_details['period_code'] = 'fq'
 
         else:
             report_period = '%d Half of ' % (g_period - 16)
@@ -158,29 +190,10 @@ class GraphsGenerator():
             report_details['report_template'] = 'reports/monthly_report.html'
             if g_period == 18: report_details['first_date'] = dt.date(g_year + 1, 1, 1)
             else: report_details['first_date'] = dt.date(g_year, ((g_period - 16) * 6) - 5, 1)
-            period_code = 'fh'
+            report_details['period_code'] = 'fh'
 
-        report_details['extra_info'] = {}
-        # get the period date details
-        self.determine_graphs_period(report_details['first_date'])
-        period_ = self.t_period[period_code]
-        report_details['extras'] = self.report_extra_details(period_)
-        
-        for r_type in self.graph_names:
-            if r_type == 'disease_distibution' or r_type == 'wordcloud':
-                # we have multiple graphs here
-                all_species = list(SyndromicDetails.objects.select_related('incidence').filter(incidence__datetime_reported__gte=period_['start']).filter(incidence__datetime_reported__lte=period_['end']).values('species').distinct('species'))
-                for specie in all_species:
-                    report_details['graphs']['%s_%s' % (r_type, specie['species'])] = "%sreports/%s_%s_%s_%d_%d.jpg" % (settings.STATIC_URL, settings.PROJECT_NAME, r_type, specie['species'], g_year, g_period )
-
-                report_details['extra_info']['all_species'] = all_species
-            else:
-                report_details['graphs'][r_type] = "%s/reports/%s_%s_%d_%d.jpg" % (settings.STATIC_URL, settings.PROJECT_NAME, r_type, g_year, g_period )
-
-        
         report_details['period'] = '%s %s' % (report_period, g_year)
         report_details['period_name'] = report_period
-
 
         return report_details
 
@@ -272,8 +285,24 @@ class GraphsGenerator():
             to_return['ag_reports_no_agrovets'] = agrovets['agrovet_name'].size
             to_return['ag_reports_agrovets'] = ', '.join(list(agrovets['agrovet_name']))
             to_return['ag_reports_top_drugs'] = '%s, %s and %s' % (ag_reports['drug_sold'][0], ag_reports['drug_sold'][1], ag_reports['drug_sold'][2])
+        
 
-        return to_return
+        # update the extra graphs
+        graphs = {}
+        extra_info = {}
+
+        for r_type in self.graph_names:
+            if r_type == 'disease_distibution' or r_type == 'wordcloud':
+                # we have multiple graphs here
+                all_species = list(SyndromicDetails.objects.select_related('incidence').filter(incidence__datetime_reported__gte=period_['start']).filter(incidence__datetime_reported__lte=period_['end']).values('species').distinct('species'))
+                for specie in all_species:
+                    graphs['%s_%s' % (r_type, specie['species'])] = "%sreports/%s_%s_%s_%d_%d.jpg" % (settings.STATIC_URL, settings.PROJECT_NAME, r_type, specie['species'], period_['year'], period_['gid'] )
+
+                extra_info['all_species'] = all_species
+            else:
+                graphs[r_type] = "%s/reports/%s_%s_%d_%d.jpg" % (settings.STATIC_URL, settings.PROJECT_NAME, r_type, period_['year'], period_['gid'] )
+
+        return to_return, extra_info, graphs
 
     def determine_graphs_period(self, report_date = None):
         print(report_date)
