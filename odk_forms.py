@@ -2353,7 +2353,8 @@ def process_syndromic_submissions(form_ids):
                     latitude=latitude,
                     longitude=longitude,
                     accuracy=accuracy,
-                    no_cases=int(subm['s2q3_rpt_livestock_count'])
+                    no_cases=int(subm['s2q3_rpt_livestock_count']),
+                    scvo_reporter=subm['s1q4_enum']
                 )
                 new_inc.publish()
 
