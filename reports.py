@@ -42,17 +42,44 @@ def report_wrapper(request, hashid):
         report_details = grapher.report_details(hashid)
         filename_ = '%s for %s.pdf' % (report_details['title'], report_details['period_name'])
 
-        if os.path.exists("%s/reports/%s" % (settings.STATIC_ROOT, filename_)) and request.GET.get('as', '') != 'html':
-            # we have the report already generated, just return the pdf
-            if settings.DEBUG: print('Serving the saved file...')
+        if request.GET.get('as', '') != 'html':
+            # we are looking for a PDF
+            if settings.DEBUG: print("Looking for %s" % filename_)
+            try:
+                if settings.USE_S3 == 'True':
+                    s3 = boto3.client('s3')
+                    s3.head_object(Bucket=settings.AWS_STORAGE_BUCKET_NAME, Key="reports/%s" % filename_)
+                    print("It seems the file is already uploaded to S3. Lets download it..")
+                    # full_filename_path = "%sreports/%s" % (settings.STATIC_URL, filename_)
+                    s3.download_file(settings.AWS_STORAGE_BUCKET_NAME, "reports/%s" % filename_, filename_)
 
-            full_filename_path = "%s/reports/%s" % (settings.STATIC_ROOT, filename_)
-            wrapper = FileWrapper(open(full_filename_path, 'rb'))
-            response = HttpResponse(wrapper, content_type='application/pdf')
-            response['Content-Disposition'] = 'attachment; filename=%s' % os.path.basename(filename_)
-            response['Content-Length'] = os.path.getsize(full_filename_path)
-            return response
-        
+                    with open(filename_, 'wb') as data:
+                        s3.download_fileobj(settings.AWS_STORAGE_BUCKET_NAME, "reports/%s" % filename_, data)
+
+                    full_filename_path = filename_
+
+                else:
+                    if os.path.exists("%s/reports/%s" % (settings.STATIC_ROOT, filename_)):
+                        raise Exception('The file %s is missing' % file_name_path)
+
+                    full_filename_path = "%s/reports/%s" % (settings.STATIC_ROOT, filename_)
+
+                    # if we are here, the damn file exists
+                if settings.DEBUG: print('Serving the saved file...')
+                wrapper = FileWrapper(open(full_filename_path, 'rb'))
+                response = HttpResponse(wrapper, content_type='application/pdf')
+                response['Content-Disposition'] = 'attachment; filename=%s' % os.path.basename(filename_)
+                response['Content-Length'] = os.path.getsize(full_filename_path)
+
+                if settings.USE_S3 == 'True': os.remove(full_filename_path)
+                return response
+
+            except Exception as e:
+                if settings.DEBUG: print(str(e))
+                # Not found
+                if settings.DEBUG: print("Generate the PDF report (%s)" % filename_ )
+
+
         if settings.DEBUG: print('Ok, gotta generate this pdf (%s) ....' % filename_)
 
         # get the period date details
@@ -105,15 +132,16 @@ def report_wrapper(request, hashid):
         return response
     
     file_name_path = "reports/%s" % ( filename_ )
+    with open("%s/%s" % (settings.STATIC_ROOT, file_name_path), "wb") as f:
+        f.write(response.rendered_content)
+
     if settings.USE_S3 == 'True':
         # push it to s3
+        if settings.DEBUG: print("Uploading %s.." % file_name_path)
+
         client = boto3.client('s3', region_name=settings.AWS_S3_REGION_NAME)
-        img_name = '%s.png' % access_code
-        img.save(img_name)
-        client.upload_file(img_name, settings.AWS_STORAGE_BUCKET_NAME, 'static/qr_codes/%s' % img_name, ExtraArgs={'ACL':'public-read'})
-    else:
-        with open("%s/%s" % (settings.STATIC_ROOT, file_name_path), "wb") as f:
-            f.write(response.rendered_content)
+        client.upload_file("%s/%s" % (settings.STATIC_ROOT, file_name_path), settings.AWS_STORAGE_BUCKET_NAME, file_name_path, ExtraArgs={'ACL':'public-read'})
+        os.remove("%s/%s" % (settings.STATIC_ROOT, file_name_path))
 
     return response
 
@@ -378,11 +406,12 @@ class GraphsGenerator():
 
     def save_graphs(self, plt, file_name_path):
         if settings.USE_S3 == 'True':
+            if settings.DEBUG: print("Uploading %s.." % file_name_path)
             # push it to s3
+            plt.savefig(os.path.basename(file_name_path))
             client = boto3.client('s3', region_name=settings.AWS_S3_REGION_NAME)
-            img_name = '%s.png' % access_code
-            img.save(img_name)
-            client.upload_file(img_name, settings.AWS_STORAGE_BUCKET_NAME, 'static/qr_codes/%s' % img_name, ExtraArgs={'ACL':'public-read'})
+            client.upload_file(os.path.basename(file_name_path), settings.AWS_STORAGE_BUCKET_NAME, file_name_path, ExtraArgs={'ACL':'public-read'})
+            os.remove(os.path.basename(file_name_path))
         else:
             plt.savefig(fname="%s/%s" % (settings.STATIC_ROOT, file_name_path))
 
