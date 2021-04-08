@@ -560,7 +560,7 @@ class GraphsGenerator():
 
             # get the weeks in this range
             no_wks = math.ceil((period_['end'] - period_['start']) / dt.timedelta(weeks=1))
-            start_wk = period_['start'].isocalendar().week
+            start_wk = int(period_['start'].strftime('%W'))
             grp_periods.extend(range(start_wk, start_wk + no_wks + 1))
 
         si_df = pd.DataFrame(list(si))
