@@ -101,6 +101,10 @@ def report_wrapper(request, hashid):
             'footer-font-size': 8,
             'footer-line': True
         }
+        
+        if settings.ENV_ROLE == 'production':
+            # use shrinking when in prod mode... for some reason shrinking imekataa
+            cmd_options_ = {**{'zoom': 0.26, 'disable-smart-shrinking': True}, **cmd_options_}
 
         report_vars = {
             'report_title': '%s %s' % (report_details['title'], report_details['period_name']),
