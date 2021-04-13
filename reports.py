@@ -329,7 +329,8 @@ class GraphsGenerator():
 
                 extra_info['all_species'] = all_species
             else:
-                graphs[r_type] = "%s/reports/%s_%s_%d_%d.jpg" % (settings.STATIC_URL, settings.PROJECT_NAME, r_type, period_['year'], period_['gid'] )
+                graphs[r_type] = "%sreports/%s_%s_%d_%d.jpg" % (settings.STATIC_URL, settings.PROJECT_NAME, r_type, period_['year'], period_['gid'] )
+
 
         return to_return, extra_info, graphs
 
