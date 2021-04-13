@@ -79,7 +79,6 @@ def report_wrapper(request, hashid):
                 # Not found
                 if settings.DEBUG: print("Generate the PDF report (%s)" % filename_ )
 
-
         if settings.DEBUG: print('Ok, gotta generate this pdf (%s) ....' % filename_)
 
         # get the period date details
@@ -96,9 +95,10 @@ def report_wrapper(request, hashid):
             'margin-top': '10mm',
             'margin-left': '20mm',
             'margin-bottom': '20mm',
-            'disable-smart-shrinking': True,
+            # 'quiet': False,
+            'image-dpi': 1200,
             'footer-right': 'Page [page] of [topage]',
-            'footer-font-size': 9,
+            'footer-font-size': 8,
             'footer-line': True
         }
 
@@ -641,26 +641,31 @@ class GraphsGenerator():
         # records per cdr reporter
         sr_df = pd.DataFrame(list( SyndromicIncidences.objects.filter(datetime_reported__gte=period_['start']).filter(datetime_reported__lte=period_['end']).values('reporter').annotate(no_reports=Count('reporter')).order_by('-no_reports') ))
 
-        # the chart will be too long, lets trim it
-        if len(sr_df) > settings.MAX_BARS: sr_df = sr_df.truncate(after=25)
-        sr_df = sr_df[::-1]     # flip values from top to bottom
+        if sr_df.empty:
+            if return_data: return sr_df
+            plt.text(0.1, 0.5, 'There were no reports submitted for disease surveillance in %s' % period_['period_name'], fontsize=10, color='red')
 
-        # get the actual names of the reporters
-        key_cdrs = sr_df['reporter']
-        cdr_df = pd.DataFrame(list(DictionaryItems.objects.filter(t_key__in=key_cdrs).values('t_key', 't_value').distinct('t_key')))
-        recs = cdr_df.set_index('t_key').T.to_dict('records')[0]
-        sr_df['cdr_names'] = [recs[cdr['reporter']] for index, cdr in sr_df.iterrows()]
+        else:
+            # the chart will be too long, lets trim it
+            if len(sr_df) > settings.MAX_BARS: sr_df = sr_df.truncate(after=25)
+            sr_df = sr_df[::-1]     # flip values from top to bottom
 
-        if return_data: return sr_df
+            # get the actual names of the reporters
+            key_cdrs = sr_df['reporter']
+            cdr_df = pd.DataFrame(list(DictionaryItems.objects.filter(t_key__in=key_cdrs).values('t_key', 't_value').distinct('t_key')))
+            recs = cdr_df.set_index('t_key').T.to_dict('records')[0]
+            sr_df['cdr_names'] = [recs[cdr['reporter']] for index, cdr in sr_df.iterrows()]
 
-        fig, ax = plt.subplots(1, figsize=(12, 8))
-        ax.barh(sr_df['cdr_names'], sr_df['no_reports'], 0.35, label='Most Active CDRs')
-        ax.set_ylabel('Community Disease Reporters (CDRs)', labelpad=15)
-        ax.set_xlabel('No of Reports', labelpad=15)
-        ax.set_title('Top 25 CDR Reporters in %s' % period_['period_name'])
-        ax.xaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
-        plt.xlim(auto=True)
-        # fig.tight_layout()
+            if return_data: return sr_df
+
+            fig, ax = plt.subplots(1, figsize=(12, 8))
+            ax.barh(sr_df['cdr_names'], sr_df['no_reports'], 0.35, label='Most Active CDRs')
+            ax.set_ylabel('Community Disease Reporters (CDRs)', labelpad=15)
+            ax.set_xlabel('No of Reports', labelpad=15)
+            ax.set_title('Top 25 CDR Reporters in %s' % period_['period_name'])
+            ax.xaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
+            plt.xlim(auto=True)
+            # fig.tight_layout()
 
         self.save_graphs(plt, file_name_path)
 
@@ -668,72 +673,82 @@ class GraphsGenerator():
         if os.path.exists("%s/%s" % (settings.STATIC_ROOT, file_name_path)): return
         sd_df = pd.DataFrame(list( SyndromicDetails.objects.select_related('incidence').filter(incidence__datetime_reported__gte=period_['start']).filter(incidence__datetime_reported__lte=period_['end']).filter(species=species).values('prov_diagnosis').annotate(no_reports=Count('prov_diagnosis')) ))
         
-        recs = sd_df.set_index('prov_diagnosis').T.to_dict('records')[0]
-        
-        # get the keys and split the diseases with multiple options
-        new_recs = {}
-        for diagnosis, count_ in recs.items():
-            if len(diagnosis.split(' ')) == 1:
-                new_recs[diagnosis] = count_ if diagnosis not in new_recs else new_recs[diagnosis] + count_
-                continue
-
-            # split this and add to our data frame
-            for cur_diag in diagnosis.split(' '):
-                new_recs[cur_diag] = count_ if cur_diag not in new_recs else new_recs[cur_diag] + count_
-
-        new_recs = pd.DataFrame(list(new_recs.items()), columns=['prov_diagnosis', 'counts'])
-
-        new_recs.sort_values(by=['counts'], inplace=True)
-
-        if return_data: return new_recs
-
-        fig, ax = plt.subplots(figsize=(12, 8))
-        if len(new_recs) < 4:
-            # draw a pie chart
-            ax.pie(new_recs['counts'], labels=new_recs['prov_diagnosis'], autopct='%1.1f%%', shadow=False, startangle=90)
-            ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
-
-        elif len(new_recs) < 6:
-            ax.bar(new_recs['prov_diagnosis'], new_recs['counts'], 0.35, label='Diseases (Prov Diagnosis)')
-            ax.set_ylabel('No of Reports')
-            ax.set_title('Differential diagnosis for %s in %s' % (species, period_['period_name']))
-            ax.xaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
-            plt.ylim(auto=True)
+        if sd_df.empty:
+            if return_data: return sd_df
+            plt.text(0.1, 0.5, 'There were no reports submitted for disease surveillance in %s' % period_['period_name'], fontsize=10, color='red')
 
         else:
-            ax.barh(new_recs['prov_diagnosis'], new_recs['counts'], 0.35, label='Diseases (Prov Diagnosis)')
-            ax.set_xlabel('No of Reports')
-            ax.set_title('Differential diagnosis for %s in %s' % (species, period_['period_name']))
-            ax.xaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
-            plt.xlim(auto=True)
+            recs = sd_df.set_index('prov_diagnosis').T.to_dict('records')[0]
+            
+            # get the keys and split the diseases with multiple options
+            new_recs = {}
+            for diagnosis, count_ in recs.items():
+                if len(diagnosis.split(' ')) == 1:
+                    new_recs[diagnosis] = count_ if diagnosis not in new_recs else new_recs[diagnosis] + count_
+                    continue
 
-        fig.tight_layout()
+                # split this and add to our data frame
+                for cur_diag in diagnosis.split(' '):
+                    new_recs[cur_diag] = count_ if cur_diag not in new_recs else new_recs[cur_diag] + count_
+
+            new_recs = pd.DataFrame(list(new_recs.items()), columns=['prov_diagnosis', 'counts'])
+
+            new_recs.sort_values(by=['counts'], inplace=True)
+
+            if return_data: return new_recs
+
+            fig, ax = plt.subplots(figsize=(12, 8))
+            if len(new_recs) < 4:
+                # draw a pie chart
+                ax.pie(new_recs['counts'], labels=new_recs['prov_diagnosis'], autopct='%1.1f%%', shadow=False, startangle=90)
+                ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
+
+            elif len(new_recs) < 6:
+                ax.bar(new_recs['prov_diagnosis'], new_recs['counts'], 0.35, label='Diseases (Prov Diagnosis)')
+                ax.set_ylabel('No of Reports')
+                ax.set_title('Differential diagnosis for %s in %s' % (species, period_['period_name']))
+                ax.xaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
+                plt.ylim(auto=True)
+
+            else:
+                ax.barh(new_recs['prov_diagnosis'], new_recs['counts'], 0.35, label='Diseases (Prov Diagnosis)')
+                ax.set_xlabel('No of Reports')
+                ax.set_title('Differential diagnosis for %s in %s' % (species, period_['period_name']))
+                ax.xaxis.grid(color='gray', linestyle='dashed', linewidth=0.5, alpha=0.5)             # show the grid lines
+                plt.xlim(auto=True)
+
+            fig.tight_layout()
         self.save_graphs(plt, file_name_path)
 
     def fetch_graph_syndromes_wordcloud(self, period_, species, file_name_path, return_data=False):
         if os.path.exists("%s/%s" % (settings.STATIC_ROOT, file_name_path)): return
         sd = SyndromicDetails.objects.select_related('incidence').filter(incidence__datetime_reported__gte=period_['start']).filter(incidence__datetime_reported__lte=period_['end']).filter(species=species).values('clinical_signs')
 
-        all_signs = []
-        all_sign_names = []
-        for sign_ in sd:
-            for sn in sign_['clinical_signs'].split(' '): all_signs.append(sn)
-                
-        unique_signs = set(all_signs)
-        
-        signs_df = pd.DataFrame(list(DictionaryItems.objects.filter(t_key__in=unique_signs).values('t_key', 't_value').distinct('t_key')))
-        signs_names = signs_df.set_index('t_key').T.to_dict('records')[0]
+        if len(sd) == 0:
+            if return_data: return {}
+            plt.text(0.1, 0.5, 'There were no reports submitted for disease surveillance in %s' % period_['period_name'], fontsize=10, color='red')
 
-        for sn in all_signs: all_sign_names.append('"%s"' % signs_names[sn])
+        else:
+            all_signs = []
+            all_sign_names = []
+            for sign_ in sd:
+                for sn in sign_['clinical_signs'].split(' '): all_signs.append(sn)
+                    
+            unique_signs = set(all_signs)
+            
+            signs_df = pd.DataFrame(list(DictionaryItems.objects.filter(t_key__in=unique_signs).values('t_key', 't_value').distinct('t_key')))
+            signs_names = signs_df.set_index('t_key').T.to_dict('records')[0]
 
-        # wc = WordCloud(collocations=False).generate(text.lower())
-        wordcloud = WordCloud(width = 800, height = 300, background_color ='white', min_font_size = 10).generate(' '.join(all_sign_names))
-  
-        # plot the WordCloud image                       
-        plt.figure(figsize = (15, 4), facecolor = None)
-        plt.imshow(wordcloud)
-        plt.axis("off")
-        plt.tight_layout(pad = 0)
+            for sn in all_signs: all_sign_names.append('"%s"' % signs_names[sn])
+
+            # wc = WordCloud(collocations=False).generate(text.lower())
+            wordcloud = WordCloud(width = 800, height = 300, background_color ='white', min_font_size = 10).generate(' '.join(all_sign_names))
+      
+            # plot the WordCloud image                       
+            plt.figure(figsize = (15, 4), facecolor = None)
+            plt.imshow(wordcloud)
+            plt.axis("off")
+            plt.tight_layout(pad = 0)
         
         self.save_graphs(plt, file_name_path)
 
@@ -744,7 +759,6 @@ class GraphsGenerator():
         if return_data: return nd_df
 
         if not nd_df.empty:
-            
             fig, ax = plt.subplots(figsize=(12, 8))
             ax.barh(nd_df['disease'], nd_df['no_reports'], 0.35, label='Notifiable Diseases')
             ax.set_xlabel('No of Reports')
@@ -763,8 +777,7 @@ class GraphsGenerator():
 
         if sh_reporters.empty:
             if return_data: return pd.DataFrame(), []
-
-            plt.text(0.1, 0.5, 'Slaughter house data was not submitted for %s' % period_['period_name'], fontsize=10, color='red')
+            plt.text(0.1, 0.5, 'There were no reports submitted from slaughter houses in %s' % period_['period_name'], fontsize=10, color='red')
         
         else:
             # get the actual names of the reporters
@@ -797,7 +810,7 @@ class GraphsGenerator():
 
         if sh_records.empty:
             if return_data: return pd.DataFrame(), [], []
-            plt.text(0.1, 0.5, 'Slaughter house data was not submitted for %s' % period_['period_name'], fontsize=10, color='red')
+            plt.text(0.1, 0.5, 'There were no reports submitted from slaughter houses in %s' % period_['period_name'], fontsize=10, color='red')
         
         else:
             sh_df = pd.pivot_table(sh_records, values='no_reports', columns=['specie'], index=['sh_report__abattoir'], aggfunc=np.sum, fill_value=0, margins=True).sort_values('All', ascending=False).sort_values('All', ascending=False, axis=1).drop('All').drop('All', axis=1)
@@ -836,7 +849,7 @@ class GraphsGenerator():
 
         if sh_lesions.empty:
             if return_data: return pd.DataFrame()
-            plt.text(0.1, 0.5, 'Slaughter house data was not submitted for %s' % period_['period_name'], fontsize=10, color='red')
+            plt.text(0.1, 0.5, 'There were no reports submitted from slaughter houses in %s' % period_['period_name'], fontsize=10, color='red')
         
         else:
             sh_lesions = pd.pivot_table(sh_lesions, values='no_lesions', columns=['sh_specie__specie'], index=['lesions'], aggfunc=np.sum, fill_value=0, margins=True).sort_values('All', ascending=False).sort_values('All', ascending=False, axis=1).drop('All').drop('All', axis=1)
@@ -876,7 +889,7 @@ class GraphsGenerator():
 
         if ag_rec.empty:
             if return_data: return pd.DataFrame()
-            plt.text(0.1, 0.5, 'There were no agrovet records submitted in %s' % period_['period_name'], fontsize=10, color='red')
+            plt.text(0.1, 0.5, 'There were no reports submitted from the agrovets in %s' % period_['period_name'], fontsize=10, color='red')
 
         else:
             # draw a pie chart
@@ -894,7 +907,7 @@ class GraphsGenerator():
 
         if ag_df.empty:
             if return_data: return pd.DataFrame()
-            plt.text(0.1, 0.5, 'There were no agrovet records submitted for %s' % period_['period_name'], fontsize=10, color='red')
+            plt.text(0.1, 0.5, 'There were no reports submitted from the agrovets in %s' % period_['period_name'], fontsize=10, color='red')
         
         else:
             ag_df = ag_df[::-1]
@@ -914,7 +927,8 @@ class GraphsGenerator():
         ag_df = pd.DataFrame(list( AGDetail.objects.select_related('ag_report').filter(ag_report__datetime_reported__gte=period_['start']).filter(ag_report__datetime_reported__lte=period_['end']).values('drug_sold', 'farmer_location').annotate(no_drugs=Count('drug_sold')).order_by('drug_sold', 'farmer_location') ))
 
         if ag_df.empty:
-            plt.text(0.1, 0.5, 'There were no agrovet records submitted for %s' % period_['period_name'], fontsize=10, color='red')
+            if return_data: return [], [], []
+            plt.text(0.1, 0.5, 'There were no reports submitted from the agrovets in %s' % period_['period_name'], fontsize=10, color='red')
         
         else:
             ag_df = pd.pivot_table(ag_df, values='no_drugs', columns=['drug_sold'], index=['farmer_location'], aggfunc=np.sum, fill_value=0, margins=True).sort_values('All', ascending=False).sort_values('All', ascending=False, axis=1).drop('All').drop('All', axis=1)
