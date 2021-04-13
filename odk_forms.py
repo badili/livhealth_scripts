@@ -25,7 +25,6 @@ from django.core.exceptions import SuspiciousOperation
 
 from django.template import Context
 
-from easy_pdf.views import PDFTemplateView
 from collections import defaultdict
 
 from django.core import serializers
