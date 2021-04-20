@@ -95,7 +95,7 @@ def report_wrapper(request, hashid):
             'margin-top': '10mm',
             'margin-left': '20mm',
             'margin-bottom': '20mm',
-            'quiet': False,
+            # 'quiet': False,
             'image-dpi': 1200,
             'footer-right': 'Page [page] of [topage]',
             'footer-font-size': 8,
