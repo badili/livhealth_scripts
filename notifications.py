@@ -707,7 +707,8 @@ class Notification():
         # if need be, crunch the data for feedback to the users
         # Notifications are scheduled on the specified day at settings.SENDING_SPLIT
 
-        cur_time = timezone.localtime(timezone.now())
+        # cur_time = timezone.localtime(timezone.now())
+        cur_time = timezone.now()
         parts = settings.SENDING_TIME.split(':')
         sending_time = cur_time.replace(hour=int(parts[0]), minute=int(parts[1]), second=int(parts[2]))
 
