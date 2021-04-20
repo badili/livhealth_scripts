@@ -2612,7 +2612,7 @@ def process_abattoir_records_v1(form_ids):
                         sh_specie.publish()
 
                         # now lets save the body parts
-                        if specie['s2q10_rpt_body_part_count'] != 0:
+                        if int(specie['s2q10_rpt_body_part_count']) != 0:
                             for b_part in specie['s2q10_rpt_body_part']:
                                 all_lesions = b_part['s2q15_lesions'].split()
                                 for lesion in all_lesions:
