@@ -20,7 +20,6 @@ from django.db.models import Q, Sum, Count, IntegerField, Min, Max, Avg
 from django.forms.models import model_to_dict
 from django.utils import timezone
 from django.template.loader import render_to_string
-from raven import Client
 
 from jinja2 import Template, FileSystemLoader
 from jinja2.environment import Environment
@@ -50,6 +49,9 @@ try:
     elif settings.SITE_NAME == 'Co-Infection Data Hub':
         from vendor.terminal_output import Terminal
         from vendor.common_tasks import Emails
+    elif settings.SITE_NAME == 'Badili Innovations':
+        from .terminal_output import Terminal
+        from .common_tasks import Emails
         
     else:
         from vendor.terminal_output import Terminal
@@ -58,7 +60,11 @@ except Exception as e:
 
 
 terminal = Terminal()
-sentry = Client(settings.SENTRY_DSN)
+
+# we are deprecating Sentry via raven
+if settings.SITE_NAME != 'Badili Innovations':
+    from raven import Client
+    sentry = Client(settings.SENTRY_DSN)
 
 current_tz = pytz.timezone(settings.TIMEZONE)
 timezone.activate(current_tz)
