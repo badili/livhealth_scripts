@@ -792,7 +792,7 @@ class GraphsGenerator():
                 reporter_names = reporters
             else:
                 recs = reporters_df.set_index('t_key').T.to_dict('records')[0]
-                reporter_names = [recs[reporter['reporter']] for index, reporter in reporters_df.iterrows()]
+                reporter_names = [recs[reporter['t_key']] for index, reporter in reporters_df.iterrows()]
 
             if return_data: return sh_reporters, reporter_names
 
