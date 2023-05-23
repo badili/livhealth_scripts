@@ -42,11 +42,13 @@ class Analytics(APIView):
             # now merge all the reports
             for top_level, data_ in syndromes.items():
                 all_data[top_level] = []
+                i = 1
                 for next_level, data1_ in data_.items():
                     all_data[top_level].append({
-                        'x': next_level,
+                        'x': i,
                         'y': [data1_, nd1s[top_level][next_level], shs[top_level][next_level], ]
                     })
+                    i += 1
 
             # accepted time spans
             # 1wk, 4wk, 12wk, 6mo
@@ -74,7 +76,7 @@ class Analytics(APIView):
             all_data['days_7'] = subms_pd.groupby('periods').count().datetime_reported.to_dict()
 
         # fill the blanks
-        for i in range((today-start_date).days):
+        for i in range((today-start_date).days + 1):
             date_ = (start_date + datetime.timedelta(days=i)).strftime('%Y-%m-%d')
             if date_ not in all_data['days_7']: all_data['days_7'][date_] = 0
 
@@ -90,7 +92,7 @@ class Analytics(APIView):
             all_data['weeks_4'] = {str(k):v for k,v in all_data['weeks_4'].items()}
 
         # fill the blanks
-        for i in range((today-start_date).days):
+        for i in range((today-start_date).days + 1):
             week_ = (start_date + datetime.timedelta(days=i)).isocalendar().week
             if week_ not in all_data['weeks_4']: all_data['weeks_4'][str(week_)] = 0
 
