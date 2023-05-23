@@ -307,7 +307,8 @@ class Notification():
         Fetches all the scheduled SMSes from the databases and adds them to a sending queue
         """
 
-        cur_time = timezone.localtime(timezone.now())
+        cur_time = datetime.datetime.now()
+        # timezone.localtime(timezone.now())
         cur_time_str = cur_time.strftime('%Y-%m-%d %H:%M:%S')
         use_provider = provider
         try:
@@ -365,6 +366,7 @@ class Notification():
 
         username = settings.SMS_GATEWAYS['gateways']['at']['USERNAME']
         api_key = settings.SMS_GATEWAYS['gateways']['at']['KEY']
+
         # print("AT: Using the creds: %s - %s" % (username, api_key))
         africastalking.initialize(username, api_key)
         self.at_sms = africastalking.SMS
@@ -381,7 +383,8 @@ class Notification():
             cur_time = cur_time.strftime('%Y-%m-%d %H:%M:%S')
             # lets send the messages synchronously... should be changed to async
             # How does AT identify a message when a callback is given
-            this_resp = self.at_sms.send(mssg.message, [mssg.recipient_no], settings.AT_SENDER_ID, False)
+            # this_resp = self.at_sms.send(mssg.message, [mssg.recipient_no], settings.AT_SENDER_ID, False)
+            this_resp = self.at_sms.send(mssg.message, [mssg.recipient_no])
 
             # print(this_resp)
             if len(this_resp['SMSMessageData']['Recipients']) == 0:

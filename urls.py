@@ -47,6 +47,7 @@ urlpatterns = [
 
     # api urls
     url(r'^smsqueue_u$', api_views.SMSQueueView.as_view(), name='SMSQueue'),
+    url(r'^api/', include('livhealth_scripts.api.urls')),
 
     # v2 urls
     url(r'^dashboard_v1/$', views.show_dashboard, name='dashboard_v1'),

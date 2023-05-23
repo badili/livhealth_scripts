@@ -105,3 +105,4 @@ venv.bak/
 
 # omit the migrations for this project since different projects will be at different points in the migration
 migrations
+.DS_Store
