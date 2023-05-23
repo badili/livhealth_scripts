@@ -81,39 +81,55 @@ class Analytics(APIView):
             if date_ not in all_data['days_7']: all_data['days_7'][date_] = 0
 
         # 4 weeks
-        start_date = start_date = today - datetime.timedelta(weeks=4)
+        start_date = today - datetime.timedelta(weeks=4)
         all_subms = cur_object.objects.filter(datetime_reported__gte=start_date, datetime_reported__lte=today).values('datetime_reported').all()
         subms_pd = pd.DataFrame(all_subms)
         if subms_pd.empty:
             all_data['weeks_4'] = {}
         else:
-            subms_pd['periods'] = subms_pd['datetime_reported'].dt.isocalendar().week
+            try:
+                subms_pd['periods'] = subms_pd['datetime_reported'].dt.isocalendar().week
+            except AttributeError:
+                subms_pd['periods'] = subms_pd['datetime_reported'].dt.isocalendar()[1]
+
             all_data['weeks_4'] = subms_pd.groupby('periods').count().datetime_reported.to_dict()
             all_data['weeks_4'] = {str(k):v for k,v in all_data['weeks_4'].items()}
 
         # fill the blanks
         for i in range((today-start_date).days + 1):
-            week_ = (start_date + datetime.timedelta(days=i)).isocalendar().week
+            try:
+                week_ = (start_date + datetime.timedelta(days=i)).isocalendar().week
+            except AttributeError:
+                week_ = (start_date + datetime.timedelta(days=i)).isocalendar()[1]
+                
             if week_ not in all_data['weeks_4']: all_data['weeks_4'][str(week_)] = 0
 
         # 4 weeks
-        start_date = start_date = today - datetime.timedelta(weeks=12)
+        start_date = today - datetime.timedelta(weeks=12)
         all_subms = cur_object.objects.filter(datetime_reported__gte=start_date, datetime_reported__lte=today).values('datetime_reported').all()
         subms_pd = pd.DataFrame(all_subms)
         if subms_pd.empty:
             all_data['weeks_12'] = {}
         else:
-            subms_pd['periods'] = subms_pd['datetime_reported'].dt.isocalendar().week
+            try:
+                subms_pd['periods'] = subms_pd['datetime_reported'].dt.isocalendar().week
+            except AttributeError:
+                subms_pd['periods'] = subms_pd['datetime_reported'].dt.isocalendar()[1]
+                
             all_data['weeks_12'] = subms_pd.groupby('periods').count().datetime_reported.to_dict()
             all_data['weeks_12'] = {str(k):v for k,v in all_data['weeks_12'].items()}
 
         # fill the blanks
-        for i in range((today-start_date).days):
-            weekn_ = (start_date + datetime.timedelta(days=i)).isocalendar().week
+        for i in range((today-start_date).days + 1):
+            try:
+                weekn_ = (start_date + datetime.timedelta(days=i)).isocalendar().week
+            except AttributeError:
+                weekn_ = (start_date + datetime.timedelta(days=i)).isocalendar()[1]
+            
             if weekn_ not in all_data['weeks_12']: all_data['weeks_12'][str(weekn_)] = 0
 
         # 6 months
-        start_date = start_date = today - datetime.timedelta(days=182)
+        start_date = today - datetime.timedelta(days=182)
         all_subms = cur_object.objects.filter(datetime_reported__gte=start_date, datetime_reported__lte=today).values('datetime_reported').all()
         subms_pd = pd.DataFrame(all_subms)
         if subms_pd.empty:
