@@ -26,6 +26,7 @@ from .odk_forms import OdkForms
 from .notifications import Notification
 from .terminal_output import Terminal
 from .models import SMSQueue, Campaign, Recipients, MessageTemplates
+from livhealth_scripts.site_management import SiteManager
 
 import os
 terminal = Terminal()
@@ -583,9 +584,10 @@ def save_recipient(request):
     csrf_token = get_or_create_csrf_token(request)
 
     try:
-        notify = Notification()
-        notify.save_recipient(request)
+        site_man = SiteManager()
+        site_man.save_recipient(request)
 
         return HttpResponse(json.dumps({'error': False, 'message': 'The recipient was saved successfully'}))
-    except Exception:
+    except Exception as e:
+        print(str(e))
         return HttpResponse(json.dumps({'error': True, 'message': 'There was an error while saving the recipient details'}))
