@@ -523,7 +523,6 @@ def sent_notifications(request):
 def manage_objects(request):
     # delete the notification with the sent id
     # csrf_token = get_or_create_csrf_token(request)
-    print()
 
     try:
         object_id = request.POST['object_id']

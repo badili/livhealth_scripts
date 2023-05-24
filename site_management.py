@@ -133,6 +133,7 @@ class SiteManager():
                 itemsetswriter = csv.writer(csvfile, delimiter=',', quotechar='"', quoting=csv.QUOTE_ALL)
                 itemsetswriter.writerow(['list_name','name','label','county','syndromes','disease','cdr_village','ward_subcounty','village_ward','enumerator_subcounty'])
 
+                # 1. Syndromic surveillance
                 # county
                 itemsetswriter.writerow(['county', 'Turkana', 'Turkana'])
 
@@ -162,13 +163,22 @@ class SiteManager():
                 itemsetswriter.writerow(['yes_no', 'no', 'No'])
 
                 # enumerators
-                all_users = Recipients.objects.select_related('sub_county').filter(designation='enumerator', is_active=True).order_by('nick_name').all()
+                all_users = Recipients.objects.select_related('sub_county').filter(designation__in=('enumerator', 'meat_inspector', 'lab_personnel'), is_active=True).order_by('nick_name').all()
                 for user in all_users:
                     if user.sub_county is None: continue
                     itemsetswriter.writerow(['enumerators', user.nick_name, '%s %s' % (user.first_name, user.other_names), '', '', '', '', '', '', user.sub_county.nick_name ])
 
-            # now upload the itemsets
-            ona.upload_itemsets_csv(itemsets, 'itemsets.csv', ['turkana_ssf_'])
+                # now upload the itemsets
+                ona.upload_itemsets_csv(itemsets, 'itemsets.csv', ['turkana_ssf_'])
+
+            '''
+            # 2. meat inspectors
+            meat_inspectors = 'itemsets.csv'
+            with open(meat_inspectors, 'w', newline='') as csvfile:
+                itemsetswriter = csv.writer(csvfile, delimiter=',', quotechar='"', quoting=csv.QUOTE_ALL)
+                itemsetswriter.writerow(['list_name','name','label','county','abattoir_subcounty','inspector_abattoir'])
+            '''
+
             # now lets delete the file, if we aren't able its not a catastrophe
             try:
                 os.remove(itemsets)
