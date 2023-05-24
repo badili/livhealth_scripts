@@ -536,10 +536,15 @@ def manage_objects(request):
             if cur_object.village is not None:
                 cur_object.ward = cur_object.village.ward
                 cur_object.sub_county = cur_object.village.ward.sub_county
+
         elif re.search('template$', request.resolver_match.url_name):
             cur_object = MessageTemplates.objects.filter(id=object_id).get()
 
         if re.search('^delete', request.resolver_match.url_name):
+            if re.search('recipient$', request.resolver_match.url_name):
+                # check if there are some SMS Queue that are yet to be sent and delete
+                SMSQueue.objects.filter(recipient=cur_object).delete()
+
             cur_object.delete()
             return HttpResponse(json.dumps({'error': False, 'message': 'The %s has been deleted successfully' % re.search('_(.+)$', request.resolver_match.url_name).group(1)}))
         elif re.search('^deactivate', request.resolver_match.url_name):

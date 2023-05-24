@@ -1,4 +1,4 @@
-
+import os
 import csv
 import pytz
 
@@ -127,7 +127,7 @@ class SiteManager():
             # print('We gonna create a new list for external selects')
             itemsets = 'itemsets.csv'
             # ona = Onadata(settings.ONADATA_URL, settings.ONADATA_MASTER)
-            ona = Onadata(settings.ONADATA_URL, settings.ONADATA_TEST)
+            ona = Onadata(settings.ONADATA_URL, settings.ONADATA_TOKEN)
 
             with open(itemsets, 'w', newline='') as csvfile:
                 itemsetswriter = csv.writer(csvfile, delimiter=',', quotechar='"', quoting=csv.QUOTE_ALL)
@@ -169,17 +169,16 @@ class SiteManager():
 
             # now upload the itemsets
             ona.upload_itemsets_csv(itemsets, 'itemsets.csv', ['turkana_ssf_'])
+            # now lets delete the file, if we aren't able its not a catastrophe
+            try:
+                os.remove(itemsets)
+            except Exception as e:
+                sentry.captureMessage('Cant delete a created file, reason %s' % str(e), level='warning', extra={'files': [itemsets]})
 
         except Exception as e:
             if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise
-
-        # now lets delete the file, if we aren't able its not a catastrophe
-        try:
-            os.remove(itemsets)
-        except Exception as e:
-            sentry.captureMessage('Cant delete a created file, reason %s' % str(e), level='warning', extra={'files': [itemsets]})
 
     def share_forms(self, username):
         try:
