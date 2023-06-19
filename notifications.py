@@ -919,7 +919,7 @@ class PazuriNotification():
                 recipient.sub_county = sub_county
             else:
                 # fabricate a nick_name for the recipient
-                nick_name = '%s_%s' % (first_name.replace("'.- ", '').lower(), other_names.replace("'.- ", '').lower())
+                username = '%s_%s' % (first_name.replace("'.- ", '').lower(), other_names.replace("'.- ", '').lower())
                 recipient = Recipients(
                     salutation=salutation,
                     first_name=first_name,
@@ -928,7 +928,7 @@ class PazuriNotification():
                     cell_no=cell_no,
                     alternative_cell_no=alternative_cell_no,
                     recipient_email=email,
-                    nick_name=nick_name,
+                    username=username,
                     village=village,
                     ward=ward,
                     sub_county=sub_county

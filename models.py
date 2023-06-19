@@ -1,6 +1,7 @@
 # import datetime
 
 from django.db import models
+from django.contrib.auth.models import AbstractUser
 from django.core.validators import RegexValidator, MaxLengthValidator, MinLengthValidator
 from django.conf import settings
 
@@ -323,6 +324,10 @@ class NDDetail(BaseTable):
         return self.id
 
 
+class SlaughterHouse(BaseTable):
+    sub_county = models.ForeignKey(SubCounty, on_delete=models.PROTECT)
+    sh_name = models.CharField(max_length=200, unique=True, blank=False, null=False)
+
 class SHReport(BaseTable):
     uuid = models.CharField(unique=True, max_length=100)
     datetime_reported = models.DateTimeField()
@@ -475,7 +480,7 @@ class MessageTemplates(BaseTable):
         db_table = 's3ld_messagetemplates'
 
 
-class Recipients(BaseTable):
+class Recipients(AbstractUser):
     """ Message recepients
 
     A master list of all our recepients. Messages will only be sent to recepients in this list
@@ -495,7 +500,7 @@ class Recipients(BaseTable):
         other_names_validator
     ])
     # this is the unique identifier used in the ODK forms
-    nick_name = models.CharField(max_length=200, null=False, blank=False, unique=True, validators=[
+    username = models.CharField(max_length=200, null=False, blank=False, unique=True, validators=[
         MaxLengthValidator(200, message='The nick names must be less than 100 characters'),
         nick_name_validator
     ])

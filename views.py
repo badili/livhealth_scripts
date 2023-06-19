@@ -491,6 +491,34 @@ def notification_settings(request):
 
 
 @login_required(login_url='/login')
+def system_settings(request):
+    csrf_token = get_or_create_csrf_token(request)
+
+    try:
+        err_msg = None
+        notify = Notification()
+        notify_settings = notify.get_notification_settings()
+
+        # get the inputs required
+        inputs = json.dumps(request.POST) if 'refresh_type' in request.POST else {}
+        inputs = {} if len(inputs) == 0 else json.loads(inputs)
+
+        page_settings = {
+            'page_title': "%s | System Settings" % settings.SITE_NAME,
+            'csrf_token': csrf_token,
+            'section_title': 'Settings',
+            'data': notify_settings,
+            'err_msg': err_msg
+        }
+        return render(request, 'system_settings.html', page_settings)
+
+    except Exception as e:
+        print(str(e))
+        sentry.captureException()
+        return redirect('/dashboard_v2/')
+
+
+@login_required(login_url='/login')
 def sent_notifications(request):
     # print('Show the sent notifications')
     csrf_token = get_or_create_csrf_token(request)

@@ -2206,6 +2206,7 @@ def auto_process_submissions():
 
     # get all the forms and process the forms matching the criteria like 'dsf'
     all_forms = odk_forms.refresh_forms()
+    if all_forms is None: return None
     syndromic_forms = []
     nd_forms = []
     abattoir_forms = []
@@ -2381,7 +2382,7 @@ def process_syndromic_submissions(form_ids):
                 # schedule to send a SMS to the CDR
                 # get the CDR who reported this incidence
                 try:
-                    cdr = Recipients.objects.filter(nick_name=subm['s1q7_cdr_name']).get()
+                    cdr = Recipients.objects.filter(username=subm['s1q7_cdr_name']).get()
                     if cdr.cell_no is None and cdr.alternative_cell_no is None:
                         if 'missing_cdr_no' not in missing_info:
                             missing_info['missing_cdr_no'] = []

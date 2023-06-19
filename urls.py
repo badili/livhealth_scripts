@@ -57,6 +57,7 @@ urlpatterns = [
 
     # improvement
     url(r'^notification_settings/$', views.notification_settings, name='notification_settings'),
+    url(r'^system_settings/$', views.system_settings, name='system_settings'),
     url(r'^sent_notifications/$', views.sent_notifications, name='sent_notifications'),
 
     url(r'^delete_notification/$', views.manage_objects, name='delete_notification'),

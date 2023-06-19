@@ -1,11 +1,14 @@
-from sentry_sdk import capture_exception
+import sentry_sdk
+
 from django.conf import settings
 from hashids import Hashids
 
+from rest_framework import status
 from rest_framework.authentication import BasicAuthentication
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError as RestValidationError
 from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
 
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -16,8 +19,11 @@ from phone_verify.base import response as phone_verify_response
 from phone_verify.api import VerificationViewSet
 from phone_verify.serializers import SMSVerificationSerializer, PhoneSerializer
 from phone_verify.services import send_security_code_and_generate_session_token
+from livhealth_scripts.models import Recipients
+from livhealth_scripts.site_management import SiteManager
 
 my_hashids = Hashids(min_length=settings.HASH_IDS_LENGTH, salt=settings.SECRET_KEY)
+sentry_sdk.init(settings.SENTRY_DSN, environment=settings.ENV_ROLE, traces_sample_rate=settings.SENTRY_TRACES_RATE)
 
 class QuietBasicAuthentication(BasicAuthentication):
     # disclaimer: once the user is logged in, this should NOT be used as a
@@ -85,7 +91,7 @@ class SelfRegistrationViewSet(VerificationViewSet):
             return phone_verify_response.Ok({'message': "The registration is complete!!"})
 
         except Exception as e:
-            capture_exception(e)
+            sentry_sdk.capture_exception(e)
             return Response({'message': "Check the OTP! There was an error while verifying the OTP!"}, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -102,9 +108,9 @@ class OTPLoginViewSet(VerificationViewSet, TokenObtainPairView):
                 if len(phone_no) != 9 and len(phone_no) != 12:
                     return Response({'message': "Please enter a valid telephone number."}, status=status.HTTP_400_BAD_REQUEST)
 
-                user = Personnel.objects.filter(tel__iendswith=phone_no).first()
+                user = Recipients.objects.filter(cell_no__iendswith=phone_no).first()
                 if user is None:
-                    return Response({'message': "The entered phone is not registered. Please try again."}, status=status.HTTP_400_BAD_REQUEST)
+                    return Response({'message': "The entered phone is not registered. Please try again."}, status=status.HTTP_404_NOT_FOUND)
 
             # all is ok... convert the phone number to an international number
             phone_no_int = '+254%s' % phone_no if len(phone_no) == 9 else '+%s' % phone_no
@@ -139,7 +145,7 @@ class OTPLoginViewSet(VerificationViewSet, TokenObtainPairView):
 
             # All is now ok
             # So lets authenticate the user and log the person in
-            cur_user = Personnel.objects.get(tel=request.data['phone_number'])
+            cur_user = Recipients.objects.get(cell_no=request.data['phone_number'])
             
             from common_func.registration import user_auth_details
             params = user_auth_details(cur_user.id)
@@ -158,7 +164,7 @@ class OTPLoginViewSet(VerificationViewSet, TokenObtainPairView):
             return Response({'message': all_errors}, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as e:
-            capture_exception(e)
+            sentry_sdk.capture_exception(e)
             return Response({'message': "Check the OTP! There was an error while verifying the OTP!"}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=False, methods=["POST"], permission_classes=[AllowAny], serializer_class=SMSVerificationSerializer, )
@@ -167,12 +173,12 @@ class OTPLoginViewSet(VerificationViewSet, TokenObtainPairView):
             serializer = SMSVerificationSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
 
-            cur_user = Personnel.objects.get(tel=request.data['phone_number'])
+            cur_user = Recipients.objects.get(cell_no=request.data['phone_number'])
             # reset the password
-            mobile_reg = MobileReg()
-            mobile_reg.reset_pass(request.data, cur_user)
+            site_manager = SiteManager()
+            site_manager.reset_pass(request.data, cur_user)
 
-            from common_func.registration import user_auth_details
+            from livhealth_scripts.site_management import user_auth_details
             params = user_auth_details(cur_user.id)
             params['message'] = "The password has been reset successfully"
 
@@ -189,5 +195,6 @@ class OTPLoginViewSet(VerificationViewSet, TokenObtainPairView):
             return Response({'message': all_errors}, status=status.HTTP_400_BAD_REQUEST)
 
         except Exception as e:
-            capture_exception(e)
+            sentry_sdk.capture_exception(e)
             return Response({'message': "There was an error resetting the password"}, status=status.HTTP_400_BAD_REQUEST)
+

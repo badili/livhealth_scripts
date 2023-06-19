@@ -31,7 +31,7 @@ class ImportODKChoices():
         self.module_name = 'Processing ODK Choices'
         # the mandatory headers for the choices spreadsheet
         self.odk_mandatory_headers = ['list_name', 'name', 'label', 'county', 'syndromes', 'disease', 'cdr_village', 'ward_subcounty', 'village_ward', 'enumerator_subcounty']
-        self.phone_number_update_headers = ['nick_name', 'phone_number']
+        self.phone_number_update_headers = ['username', 'phone_number']
 
     def process_odk_choices_file(self, input_file):
         terminal.tprint('Processing the file %s...' % input_file, 'info')
@@ -158,7 +158,7 @@ class ImportODKChoices():
         # we are only interested in updating CDR details
         # check if the cdr details are already saved in the database... if they are, update them if they are different
         try:
-            personnel = Recipients.objects.filter(nick_name=pers['name'].strip()).get()
+            personnel = Recipients.objects.filter(username=pers['name'].strip()).get()
         except Recipients.DoesNotExist:
             # the pers is not saved in the Recipients database, so lets add him
             # get the village of this CDR
@@ -187,7 +187,7 @@ class ImportODKChoices():
                     salutation=salutation,
                     first_name=cdr_names[:1][0],
                     other_names=None if len(cdr_names[1:]) == 0 else ' '.join(cdr_names[1:]),
-                    nick_name=pers['name'].strip(),
+                    username=pers['name'].strip(),
                     designation=pers_type,
                     village=village,
                     sub_county=sub_county
@@ -225,7 +225,7 @@ class ImportODKChoices():
 
     def update_personnel(self, pers):
         try:
-            personnel = Recipients.objects.filter(nick_name=pers['nick_name'].strip()).get()
+            personnel = Recipients.objects.filter(username=pers['nick_name'].strip()).get()
             to_save = False
             processed_number = self.format_phone_number(pers['phone_number'])
             if 'email' in pers:
@@ -248,7 +248,7 @@ class ImportODKChoices():
         except ValueError as e:
             terminal.tprint(str(e), 'fail')
         except Recipients.DoesNotExist:
-            terminal.tprint("'%s' does not exist in the database, skipping them for now..." % pers['nick_name'].strip(), 'info')
+            terminal.tprint("'%s' does not exist in the database, skipping them for now..." % pers['username'].strip(), 'info')
         except Exception:
             raise
 

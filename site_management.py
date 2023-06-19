@@ -2,11 +2,17 @@ import os
 import csv
 import pytz
 
-from django.conf import settings
-from django.db import transaction
-from django.utils import timezone
 from hashids import Hashids
 from raven import Client
+
+from django.conf import settings
+from django.contrib.auth.hashers import make_password
+from django.db import transaction
+from django.utils import timezone
+
+from rest_framework.authtoken.models import Token
+from rest_framework_simplejwt.tokens import RefreshToken
+from django.core.exceptions import ValidationError
 
 from .models import Recipients, SubCounty, Ward, Village
 from .odk_choices_parser import ImportODKChoices
@@ -85,8 +91,8 @@ class SiteManager():
                 recipient.ward = ward
                 recipient.sub_county = sub_county
             else:
-                # fabricate a nick_name for the recipient
-                nick_name = '%s_%s' % (first_name.replace("'.- ", '').lower(), other_names.replace("'.- ", '').lower())
+                # fabricate a username for the recipient
+                username = '%s_%s' % (first_name.replace("'.- ", '').lower(), other_names.replace("'.- ", '').lower())
                 recipient = Recipients(
                     salutation=salutation,
                     first_name=first_name,
@@ -95,7 +101,7 @@ class SiteManager():
                     cell_no=cell_no,
                     alternative_cell_no=alternative_cell_no,
                     recipient_email=email,
-                    nick_name=nick_name,
+                    username=username,
                     village=village,
                     ward=ward,
                     sub_county=sub_county
@@ -153,34 +159,46 @@ class SiteManager():
                     itemsetswriter.writerow(['villages', village.nick_name, village.village_name, '', '', '', '', '', village.ward.nick_name])
 
                 # cdrs
-                all_cdrs = Recipients.objects.select_related('village').filter(designation='cdr', is_active=True).order_by('nick_name').all()
+                all_cdrs = Recipients.objects.select_related('village').filter(designation='cdr', is_active=True).order_by('username').all()
                 for cdr in all_cdrs:
                     if cdr is None: continue
-                    itemsetswriter.writerow(['cdrs', cdr.nick_name, '%s %s' % (cdr.first_name, cdr.other_names), '', '', '', cdr.village.nick_name])
+                    itemsetswriter.writerow(['cdrs', cdr.username, '%s %s' % (cdr.first_name, cdr.other_names), '', '', '', cdr.village.nick_name])
+
+                # enumerators
+                all_users = Recipients.objects.select_related('sub_county').filter(designation__in=('enumerator', 'meat_inspector', 'lab_personnel'), is_active=True).order_by('username').all()
+                for user in all_users:
+                    if user.sub_county is None: continue
+                    itemsetswriter.writerow(['enumerators', user.username, '%s %s' % (user.first_name, user.other_names), '', '', '', '', '', '', user.sub_county.nick_name])
 
                 # yes -- no
                 itemsetswriter.writerow(['yes_no', 'yes', 'Yes'])
                 itemsetswriter.writerow(['yes_no', 'no', 'No'])
 
-                # enumerators
-                all_users = Recipients.objects.select_related('sub_county').filter(designation__in=('enumerator', 'meat_inspector', 'lab_personnel'), is_active=True).order_by('nick_name').all()
-                for user in all_users:
-                    if user.sub_county is None: continue
-                    itemsetswriter.writerow(['enumerators', user.nick_name, '%s %s' % (user.first_name, user.other_names), '', '', '', '', '', '', user.sub_county.nick_name ])
+            # now upload the itemsets
+            ona.upload_itemsets_csv(itemsets, 'itemsets.csv', ['turkana_ssf_'])
+            os.remove(itemsets)
 
-                # now upload the itemsets
-                ona.upload_itemsets_csv(itemsets, 'itemsets.csv', ['turkana_ssf_'])
-
-            '''
-            # 2. meat inspectors
+            # 2. meat inspectors ==> meat_inspector
             meat_inspectors = 'itemsets.csv'
             with open(meat_inspectors, 'w', newline='') as csvfile:
                 itemsetswriter = csv.writer(csvfile, delimiter=',', quotechar='"', quoting=csv.QUOTE_ALL)
                 itemsetswriter.writerow(['list_name','name','label','county','abattoir_subcounty','inspector_abattoir'])
-            '''
+
+                # meat inspectors
+                all_inspectors = Recipients.objects.filter(designation__in=('meat_inspector'), is_active=True).order_by('username').all()
+                for inspector in all_inspectors:
+                    itemsetswriter.writerow(['meat_inspector', inspector.username, '%s %s' % (inspector.first_name, inspector.other_names), '', '', '', '', '', '', inspector.sub_county.nick_name])
+
+
+            # 3. Agrovet personnel ==> agorvet_personnel
+
+            # 4. Lab ==> lab_personnel
+
+            # 5. LivHealth ==> livhealth_mgmt, livhealth_admin
 
             # now lets delete the file, if we aren't able its not a catastrophe
             try:
+                # print('to be removed')
                 os.remove(itemsets)
             except Exception as e:
                 sentry.captureMessage('Cant delete a created file, reason %s' % str(e), level='warning', extra={'files': [itemsets]})
@@ -195,11 +213,11 @@ class SiteManager():
             onadata = Onadata(settings.ONADATA_URL, settings.ONADATA_MASTER)
 
             # share the forms with the new users
-            all_peeps = list(Recipients.objects.filter(nick_name=username).values('designation', 'nick_name').all())
+            all_peeps = list(Recipients.objects.filter(username=username).values('designation', 'username').all())
             permissions = []
             for peep in all_peeps:
                 if peep['designation'] != 'enumerator': continue
-                permissions.append({'role': 'dataentry', 'username': peep['nick_name'].lower()})
+                permissions.append({'role': 'dataentry', 'username': peep['username'].lower()})
 
             form_prefixes = '|'.join(settings.FORMS_PREFIXES)
             shared_forms = onadata.share_project_forms(form_prefixes, permissions)
@@ -210,3 +228,36 @@ class SiteManager():
             if settings.DEBUG: terminal.tprint(str(e), 'fail')
             sentry.captureException()
             raise
+
+    def reset_pass(self, request_data, cur_user):
+        try:
+            transaction.set_autocommit(False)
+            # print(request_data)
+            # we should receive a password and confirm password, check if they match
+            if 'pwd' not in request_data or 'pwd_confirm' not in request_data:
+                raise ValidationError("The password or password confirmation is missing")
+            if request_data['pwd'] != request_data['pwd_confirm']:
+                raise ValidationError("The submitted passwords don't match")
+
+            password = make_password(request_data['pwd'])
+            cur_user.password = password
+            
+            # this should be activated later on
+            # onadata = Onadata(settings.ONADATA_URL, settings.ONADATA_MASTER)
+            # onadata.reset_ona_password(cur_user.email, request_data['pwd'])
+
+            transaction.commit()
+
+        except Exception as e:
+            transaction.rollback()
+            sentry_sdk.capture_exception(e)
+            raise
+
+def user_auth_details(user_id):
+    user=Recipients.objects.get(id=user_id)
+    token, created = Token.objects.get_or_create(user=user)
+    refresh = RefreshToken.for_user(user)
+    params = {'token': token.key, 'access': str(refresh.access_token), 'phone_no': user.cell_no, 'username': user.username, 'designation': user.designation}
+
+    return params
+
