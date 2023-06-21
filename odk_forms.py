@@ -200,7 +200,7 @@ class OdkForms():
         """
         Refresh the list of forms in the database
         """
-        url = "%s%s" % (self.server, self.api_all_forms)
+        url = "%s/%s" % (self.server, self.api_all_forms)
         all_forms = self.process_curl_request(url)
         if all_forms is None:
             print(("Error while executing the API request %s" % url))
@@ -259,8 +259,8 @@ class OdkForms():
                 # we have some new submissions, so fetch them from the server and save them offline
                 terminal.tprint("\tWe have some new submissions, so fetch them from the server and save them offline", 'info')
                 # fetch the submissions and filter by submission time
-                url = "%s%s%d.json?start=1&limit=5&sort=%s" % (self.server, self.form_data, form_id, '{"_submission_time":-1}')
-                url = "%s%s%d.json?fields=[\"_uuid\", \"_id\"]" % (self.server, self.form_data, form_id)
+                url = "%s/%s%d.json?start=1&limit=5&sort=%s" % (self.server, self.form_data, form_id, '{"_submission_time":-1}')
+                url = "%s/%s%d.json?fields=[\"_uuid\", \"_id\"]" % (self.server, self.form_data, form_id)
                 submission_uuids = self.process_curl_request(url)
 
                 for uuid in submission_uuids:
@@ -268,7 +268,7 @@ class OdkForms():
                     cur_submission = RawSubmissions.objects.filter(form_id=odk_form.id, uuid=uuid['_uuid'])
                     if cur_submission.count() == 0:
                         # the current submission is not saved in the database, so fetch and save it...
-                        url = "%s%s%d/%s" % (self.server, self.form_data, form_id, uuid['_id'])
+                        url = "%s/%s%d/%s" % (self.server, self.form_data, form_id, uuid['_id'])
                         submission = self.process_curl_request(url)
 
                         t_submission = RawSubmissions(
@@ -306,7 +306,7 @@ class OdkForms():
     def online_submissions_count(self, form_id):
         # given a form id, process the number of submitted instances
         # terminal.tprint("\tComputing the number of submissions of the form with id '%s'" % form_id, 'info')
-        url = "%s%s%d?%s" % (self.server, self.form_stats, form_id, "group=&name=time")
+        url = "%s/%s%d?%s" % (self.server, self.form_stats, form_id, "group=&name=time")
         stats = self.process_curl_request(url)
 
         if stats is None:
@@ -366,7 +366,7 @@ class OdkForms():
         """
         Get the structure of the current form
         """
-        url = "%s%s%d/form.json" % (self.server, self.form_rep, form_id)
+        url = "%s/%s%d/form.json" % (self.server, self.form_rep, form_id)
         terminal.tprint("Fetching the form structure for form with id = %d" % form_id, 'header')
         form_structure = self.process_curl_request(url)
 
@@ -384,7 +384,7 @@ class OdkForms():
         # terminal.tprint("Processed %d group nodes" % self.cur_node_id, 'warn')
         
         # get the form metadata if there is additional metadata
-        url = "%s%s?xform=%d" % (self.server, self.metadata_uri, form_id)
+        url = "%s/%s?xform=%d" % (self.server, self.metadata_uri, form_id)
         terminal.tprint("Fetching the form metadata for form with id = %d" % form_id, 'header')
         form_metadata = self.process_curl_request(url)
         # terminal.tprint(json.dumps(form_metadata), 'warn')
@@ -465,7 +465,7 @@ class OdkForms():
             for form_md in metadata:
                 if form_md['data_file_type'] == 'text/csv':
                     # download this guy
-                    url = "%s%s/%d.csv" % (self.server, self.metadata_uri, form_md['id'])
+                    url = "%s/%s/%d.csv" % (self.server, self.metadata_uri, form_md['id'])
                     terminal.tprint("Fetching the csv file '%s'" % form_md['data_value'], 'header')
                     file_path = '%d_%s' % (form_md['id'], form_md['data_value'])
                     self.fetch_form_metadata(url, {'path_to_save': file_path})

@@ -1,4 +1,5 @@
 import re
+import json
 import datetime
 import numpy as np
 import pandas as pd
@@ -15,12 +16,15 @@ from sentry_sdk import capture_exception
 from hashids import Hashids
 
 from livhealth_scripts.models import SyndromicIncidences, NDReport, SHReport
+from livhealth_scripts.odk_forms import OdkForms
 
 class Analytics(APIView):
     def dispatch(self, request, *args, **kwargs):
         if request.method == 'POST':
             if re.search('submissions$', request.path):
                 return self.submissions(request, *args, **kwargs)
+            elif re.search('subcounty_rankings$', request.path):
+                return self.subcounty_rankings(request, *args, **kwargs)
 
         
         return JsonResponse({'message': "Unknown path '%s'" % request.path}, status=500, safe=False)
@@ -29,9 +33,11 @@ class Analytics(APIView):
 
     def submissions(self, request, *args, **kwargs):
         try:
+            '''
             t_span = request.POST['t_span']
             if t_span not in ('1wk', '4wk', '12wk', '6mo'):
                 return JsonResponse({'message': "Please specify a valid time span"}, status=500, safe=False)
+            '''
 
             syndromes = self.analyze_submissions(SyndromicIncidences)
             nd1s = self.analyze_submissions(NDReport)
@@ -104,7 +110,7 @@ class Analytics(APIView):
                 
             if week_ not in all_data['weeks_4']: all_data['weeks_4'][str(week_)] = 0
 
-        # 4 weeks
+        # 12 weeks
         start_date = today - datetime.timedelta(weeks=12)
         all_subms = cur_object.objects.filter(datetime_reported__gte=start_date, datetime_reported__lte=today).values('datetime_reported').all()
         subms_pd = pd.DataFrame(all_subms)
@@ -144,3 +150,96 @@ class Analytics(APIView):
             if month_ not in all_data['months_6']: all_data['months_6'][month_] = 0
 
         return all_data
+
+    def subcounty_rankings(self, request, *args, **kwargs):
+        try:
+            all_data = {}
+            today = datetime.date.today()
+
+            # 1 week
+            start_date = today - datetime.timedelta(days=7)
+            all_data['days_7'] = self.compute_ranking(start_date)
+
+            # 4 weeks
+            start_date = today - datetime.timedelta(weeks=4)
+            all_data['weeks_4'] = self.compute_ranking(start_date)
+
+            # 12 weeks
+            start_date = today - datetime.timedelta(weeks=12)
+            all_data['weeks_12'] = self.compute_ranking(start_date)
+
+            # 6 months ranking
+            start_date = today - datetime.timedelta(days=182)
+            all_data['months_6'] = self.compute_ranking(start_date)
+
+            return JsonResponse(all_data, status=200, safe=False)
+
+        except Exception as e:
+            capture_exception(e)
+            if settings.DEBUG: print(str(e))
+            return JsonResponse({'message': "Error while fetching the analytics"}, status=500, safe=False)
+
+    def compute_ranking(self, start_date):
+        # get the number of records of
+        # 1. syndromes
+        # 2. nd1
+        # 3. zero
+        # 
+        all_data = {}
+
+        # syndromic
+        syndromes_count = SyndromicIncidences.objects.filter(datetime_reported__gte=start_date).values('sub_county').annotate(sc_recs=Count('sub_county')).values('sc_recs', 'sub_county').all()
+        for syn in syndromes_count:
+            if syn['sub_county'] not in all_data:
+                all_data[syn['sub_county']] = {}
+
+            all_data[syn['sub_county']]['syndromic'] = syn['sc_recs']
+
+        # ND1
+        nd_reports = NDReport.objects.filter(datetime_reported__gte=start_date).values('sub_county').annotate(nd_count=Count('sub_county')).values('nd_count', 'sub_county').all()
+        for nd in nd_reports:
+            if nd['sub_county'] not in all_data:
+                all_data[nd['sub_county']] = {}
+
+            all_data[nd['sub_county']]['nd1'] = nd['nd_count']
+
+        # Zero reports .. we haven't processed zero reports, so we gonna use 0s for now
+        '''
+        zero_reports = NDReport.objects.filter(datetime_reported__gte=start_date).values('sub_county').annotate(nd_count=Count('sub_county')).values('nd_count', 'sub_county').all()
+        for nd in zero_reports:
+            if nd['sub_county'] not in all_data:
+                all_data[nd['sub_county']] = {}
+
+            all_data[nd['sub_county']]['nd1'] = nd['nd_count']
+        '''
+
+        # now iterate through the subcounties and do the math
+        odk_form = OdkForms()
+        for sc_name in settings.SUB_COUNTIES:
+            full_name = odk_form.get_value_from_dictionary(sc_name)
+            if sc_name not in all_data:
+                all_data[sc_name] = {'syndromic': 0, 'nd1': 0, 'zero': 0, 'total': 0}
+
+            if 'syndromic' not in all_data[sc_name]: all_data[sc_name]['syndromic'] = 0
+            if 'nd1' not in all_data[sc_name]: all_data[sc_name]['nd1'] = 0
+            all_data[sc_name]['zero'] = 0
+            all_data[sc_name]['total'] = all_data[sc_name]['syndromic'] + all_data[sc_name]['nd1'] + all_data[sc_name]['zero']
+            
+            all_data[sc_name]['subCountyName'] = full_name
+
+        # print(json.dumps(all_data))
+        # lets do the ordering
+        to_return = []
+        i = 1
+        for sc_name in (sorted(all_data, reverse=True, key=lambda sc_name:all_data[sc_name]['total'])):
+            all_data[sc_name]['rank'] = i
+            to_return.append(all_data[sc_name])
+            i+=1
+
+        return to_return
+
+
+
+
+
+

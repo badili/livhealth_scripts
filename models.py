@@ -328,6 +328,7 @@ class SlaughterHouse(BaseTable):
     sub_county = models.ForeignKey(SubCounty, on_delete=models.PROTECT)
     sh_name = models.CharField(max_length=200, unique=True, blank=False, null=False)
 
+
 class SHReport(BaseTable):
     uuid = models.CharField(unique=True, max_length=100)
     datetime_reported = models.DateTimeField()

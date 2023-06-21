@@ -104,7 +104,8 @@ class SiteManager():
                     username=username,
                     village=village,
                     ward=ward,
-                    sub_county=sub_county
+                    sub_county=sub_county,
+                    password='TurkanaSSF'
                 )
             recipient.full_clean()
             recipient.save()
