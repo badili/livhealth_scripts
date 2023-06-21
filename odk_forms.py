@@ -2473,6 +2473,7 @@ def process_notifiable_diseases(form_ids):
                     sub_county=subm['s1q3_sub_county'],
                     ward=subm['s1q4_ward'],
                     village=subm['s1q5_village'],
+                    reporter=subm['s1q5_village'] if 's1q5_village' in subm else None,
                     latitude=latitude,
                     longitude=longitude,
                     accuracy=accuracy,

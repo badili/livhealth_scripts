@@ -282,7 +282,7 @@ class NDReport(BaseTable):
     sub_county = models.CharField(max_length=50)
     ward = models.CharField(max_length=50, null=True)
     village = models.CharField(max_length=50, null=True)
-    # reporter = models.CharField(max_length=50)                # Can't find the reporter field, why??
+    reporter = models.CharField(max_length=100, null=True, blank=True, default=None)
     latitude = models.DecimalField(max_digits=11, decimal_places=9)
     longitude = models.DecimalField(max_digits=12, decimal_places=9)
     accuracy = models.DecimalField(max_digits=7, decimal_places=1)

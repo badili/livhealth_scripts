@@ -16,5 +16,6 @@ otp_router.register(r'otp_login', OTPLoginViewSet, basename='otp')
 urlpatterns = [
     *otp_router.urls,
     re_path('submissions', Analytics.as_view(), name='submissions'),
-    re_path('subcounty_rankings', Analytics.as_view(), name='subcounty_rankings')
+    re_path('subcounty_rankings', Analytics.as_view(), name='subcounty_rankings'),
+    re_path('enumerator_ranking', Analytics.as_view(), name='enumerator_ranking'),
 ]

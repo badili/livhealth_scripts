@@ -25,6 +25,8 @@ class Analytics(APIView):
                 return self.submissions(request, *args, **kwargs)
             elif re.search('subcounty_rankings$', request.path):
                 return self.subcounty_rankings(request, *args, **kwargs)
+            elif re.search('enumerator_ranking$', request.path):
+                return self.enumerator_ranking(request, *args, **kwargs)
 
         
         return JsonResponse({'message': "Unknown path '%s'" % request.path}, status=500, safe=False)
@@ -177,14 +179,13 @@ class Analytics(APIView):
         except Exception as e:
             capture_exception(e)
             if settings.DEBUG: print(str(e))
-            return JsonResponse({'message': "Error while fetching the analytics"}, status=500, safe=False)
+            return JsonResponse({'message': "Error while fetching the sub county rankings"}, status=500, safe=False)
 
     def compute_ranking(self, start_date):
         # get the number of records of
         # 1. syndromes
         # 2. nd1
         # 3. zero
-        # 
         all_data = {}
 
         # syndromic
@@ -238,6 +239,78 @@ class Analytics(APIView):
 
         return to_return
 
+    def enumerator_ranking(self, request, *args, **kwargs):
+        try:
+            all_data = {}
+            today = datetime.date.today()
+
+            # 1 week
+            start_date = today - datetime.timedelta(days=7)
+            all_data['days_7'] = self.compute_enum_ranking(start_date)
+
+            # 4 weeks
+            start_date = today - datetime.timedelta(weeks=4)
+            all_data['weeks_4'] = self.compute_enum_ranking(start_date)
+
+            # 12 weeks
+            start_date = today - datetime.timedelta(weeks=12)
+            all_data['weeks_12'] = self.compute_enum_ranking(start_date)
+
+            # 6 months ranking
+            start_date = today - datetime.timedelta(days=182)
+            all_data['months_6'] = self.compute_enum_ranking(start_date)
+
+            return JsonResponse(all_data, status=200, safe=False)
+
+        except Exception as e:
+            capture_exception(e)
+            if settings.DEBUG: print(str(e))
+            return JsonResponse({'message': "Error while fetching the enumerator rankings"}, status=500, safe=False)
+
+    def compute_enum_ranking(self, start_date):
+        # get the number of records of
+        # 1. syndromes
+        # 2. nd1
+        # 3. zero
+        all_data = {}
+
+        # syndromic
+        syndromes_count = SyndromicIncidences.objects.filter(datetime_reported__gte=start_date).values('reporter').annotate(no_recs=Count('reporter')).values('no_recs', 'reporter').all()
+        for syn in syndromes_count:
+            if syn['reporter'] not in all_data:
+                all_data[syn['reporter']] = {}
+
+            all_data[syn['reporter']]['syndromic'] = syn['no_recs']
+
+        # nd1
+        nd1_reports_count = NDReport.objects.filter(datetime_reported__gte=start_date, reporter__isnull=False).values('reporter').annotate(no_recs=Count('reporter')).values('no_recs', 'reporter').all()
+        for nd in nd1_reports_count:
+            if nd['reporter'] not in all_data:
+                all_data[nd['reporter']] = {}
+
+            all_data[nd['reporter']]['nd'] = nd['no_recs']
+
+        for reporter, recs in all_data.items():
+            if 'nd' not in recs: recs['nd'] = 0
+            if 'syndromic' not in recs: recs['syndromic'] = 0
+
+            recs['total'] = recs['nd'] + recs['syndromic']
+
+        # ordering and getting top 5
+        to_return = []
+        i = 1
+        odk_form = OdkForms()
+        for name_ in (sorted(all_data, reverse=True, key=lambda name_:all_data[name_]['total'])):
+            to_return.append({
+                'rank': i,
+                'name': odk_form.get_value_from_dictionary(name_),
+                'records': all_data[name_]['total']
+            })
+            i+=1
+
+            if i==6: break
+
+        return to_return
 
 
 
