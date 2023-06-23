@@ -328,13 +328,15 @@ class Notification():
                 use_provider = random.choice(list(settings.SMS_GATEWAYS['gateways'].keys()))
 
             # fetch the sms whose sending schedule time has passed
-            sms2send = SMSQueue.objects.filter(schedule_time__lte=cur_time_str, msg_status__in=statuses_to_use).order_by('id').all()
+            # sms2send = SMSQueue.objects.filter(schedule_time__lte=cur_time_str, msg_status__in=statuses_to_use).order_by('id').all()
+            sms2send = SMSQueue.objects.filter(msg_status__in=['SCHEDULED']).order_by('id').all()
             for sched_sms in sms2send:
                 if sched_sms.recipient_no in self.testing_numbers:
                     # we have a testing message, don't send it
                     continue
                 # print('%s: %s - %s' % (sched_sms.id, sched_sms.schedule_time, sched_sms.recipient_no))
-                print('Seconds Diff\nCur Time = %s, Sched Time = %s\n````````````\n%.1f -- %d\n--\n' % (cur_time_str, sched_sms.schedule_time, (cur_time - sched_sms.schedule_time).total_seconds(), settings.MESSAGE_VALIDITY * 60 * 60))
+                if settings.DEBUG:
+                    print('Seconds Diff\nCur Time = %s, Sched Time = %s\n````````````\n%.1f -- %d\n--\n' % (cur_time_str, sched_sms.schedule_time, (cur_time - sched_sms.schedule_time).total_seconds(), settings.MESSAGE_VALIDITY * 60 * 60))
                 if (cur_time - sched_sms.schedule_time).total_seconds() > settings.MESSAGE_VALIDITY * 60 * 60:
                     if settings.DEBUG: print('The message is expired...')
                     sentry.captureMessage("Expired message to %s: '%s'" % (sched_sms.recipient_no, sched_sms.message), level='warning', extra={'cur_time': cur_time_str, 'scheduled_time': sched_sms.schedule_time.strftime('%Y-%m-%d %H:%M:%S'), 'message_validity': '%d Sec' % settings.MESSAGE_VALIDITY * 60 * 60})
@@ -347,7 +349,7 @@ class Notification():
                 
                 if use_provider == 'at':
                     terminal.tprint('Sending the SMS via AT...', 'info')
-                    self.send_via_at(sched_sms)
+                    # self.send_via_at(sched_sms)
                 elif use_provider == 'nexmo':
                     terminal.tprint('Sending the SMS via Nexmo...', 'info')
                     self.send_via_nexmo(sched_sms)
@@ -639,7 +641,6 @@ class Notification():
         sending_time = cur_time.replace(hour=int(parts[0]), minute=int(parts[1]), second=int(parts[2]))
 
         split_seconds = (cur_time - sending_time).total_seconds()
-        print('\n%s: Splits\n````````````\n%.1f -- %.1f\n--\n' % (cur_time.strftime('%A %d-%m %H:%M:%S'), split_seconds, settings.SENDING_SPLIT))
 
         # loop through the campaigns and determine the one that needs processing
         campaigns = Campaign.objects.all()
@@ -647,7 +648,12 @@ class Notification():
         i = 0
         for campaign in campaigns:
             if cur_time.strftime('%A') == campaign.schedule_time:
-                # print('\n%s campaign should be ran today...' % campaign.campaign_name)
+                if settings.DEBUG:
+                    print('\n%s campaign should be ran today...' % campaign.campaign_name)
+                    print('Sending time -- %s' % settings.SENDING_TIME)
+                    print('\n%s: Splits' % cur_time.strftime('%A %d-%m %H:%M:%S'))
+                    print('````````````\n%.1f -- %.1f' % (split_seconds, settings.SENDING_SPLIT))
+
                 # the campaign should ran today
                 if split_seconds > -1 and split_seconds < settings.SENDING_SPLIT:
                     # get the templates assigned to this campaign that needs to be processed
@@ -663,8 +669,16 @@ class Notification():
                         sub_counties_stats = {}
                         for recipient in recipients:
                             if template.template_name == 'SCVO Weekly Reminder':
-                                # recipient_name
-                                message = template.template % (recipient.first_name)
+                                # check if this recipient is already added in the list, if is added, skip the guy
+                                try:
+                                    cell_no = '+254720000097' if settings.DEBUG else recipient.cell_no if recipient.cell_no else recipient.alternative_cell_no
+                                    SMSQueue.objects.filter(template=template, recipient_no=cell_no, schedule_time__gte=date.today()).all()
+                                    # this sms is already added.... lets move on
+                                    # print('%s sms already scheduled for %s' % (template.template_name, cell_no))
+                                    continue
+                                except SMSQueue.DoesNotExist:
+                                    message = template.template % (recipient.first_name)
+
                             elif template.template_name == 'SCVO Weekly Report':
                                 if recipient.sub_county.nick_name not in sub_counties_stats:
                                     sc_stats = self.management_weekly_report(odk_form, [recipient.sub_county.nick_name, ''])
@@ -689,9 +703,10 @@ class Notification():
                             #     break
                     # print(sub_counties_stats)
 
-        print('\nSent %d messages\n' % i)
+        if settings.DEBUG: print('\nSent %d messages\n' % i)
 
     def management_weekly_report(self, odk_form, sub_counties):
+
         # get the number of reports received from the previous week, monday to sunday
         today = timezone.datetime.today()
         end_date = today + datetime.timedelta(days=1)
