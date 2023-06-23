@@ -349,7 +349,7 @@ class Notification():
                 
                 if use_provider == 'at':
                     terminal.tprint('Sending the SMS via AT...', 'info')
-                    # self.send_via_at(sched_sms)
+                    self.send_via_at(sched_sms)
                 elif use_provider == 'nexmo':
                     terminal.tprint('Sending the SMS via Nexmo...', 'info')
                     self.send_via_nexmo(sched_sms)
@@ -381,8 +381,9 @@ class Notification():
         """
         try:
             # queue the message to be sent via africastalking. Once queued, update the database with the queue status
-            cur_time = timezone.localtime(timezone.now())
+            cur_time = datetime.datetime.now()
             cur_time = cur_time.strftime('%Y-%m-%d %H:%M:%S')
+
             # lets send the messages synchronously... should be changed to async
             # How does AT identify a message when a callback is given
             # this_resp = self.at_sms.send(mssg.message, [mssg.recipient_no], settings.AT_SENDER_ID, False)
@@ -668,16 +669,20 @@ class Notification():
                         recipients = Recipients.objects.filter(designation__in=user_groups)
                         sub_counties_stats = {}
                         for recipient in recipients:
-                            if template.template_name == 'SCVO Weekly Reminder':
+                            # these sms are only meant to be sent once a daya
+                            if template.template_name in('SCVO Weekly Reminder', 'SCVO Weekly Report', 'Management Weekly Report'):
                                 # check if this recipient is already added in the list, if is added, skip the guy
                                 try:
                                     cell_no = '+254720000097' if settings.DEBUG else recipient.cell_no if recipient.cell_no else recipient.alternative_cell_no
-                                    SMSQueue.objects.filter(template=template, recipient_no=cell_no, schedule_time__gte=date.today()).all()
+                                    SMSQueue.objects.filter(template=template, recipient_no=cell_no, schedule_time__gte=date.today()).get()
                                     # this sms is already added.... lets move on
                                     # print('%s sms already scheduled for %s' % (template.template_name, cell_no))
                                     continue
                                 except SMSQueue.DoesNotExist:
-                                    message = template.template % (recipient.first_name)
+                                    pass
+
+                            if template.template_name == 'SCVO Weekly Reminder':
+                                message = template.template % (recipient.first_name)
 
                             elif template.template_name == 'SCVO Weekly Report':
                                 if recipient.sub_county.nick_name not in sub_counties_stats:
