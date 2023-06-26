@@ -15,7 +15,7 @@ from rest_framework.views import APIView
 from sentry_sdk import capture_exception
 from hashids import Hashids
 
-from livhealth_scripts.models import SyndromicIncidences, NDReport, SHReport
+from livhealth_scripts.models import SyndromicIncidences, NDReport, SHReport, Recipients
 from livhealth_scripts.odk_forms import OdkForms
 
 class Analytics(APIView):
@@ -27,6 +27,10 @@ class Analytics(APIView):
                 return self.subcounty_rankings(request, *args, **kwargs)
             elif re.search('enumerator_ranking$', request.path):
                 return self.enumerator_ranking(request, *args, **kwargs)
+            elif re.search('cdr_ranking$', request.path):
+                return self.cdr_ranking(request, *args, **kwargs)
+            elif re.search('cdr_analytics$', request.path):
+                return self.cdr_analytics(request, *args, **kwargs)
 
         
         return JsonResponse({'message': "Unknown path '%s'" % request.path}, status=500, safe=False)
@@ -312,7 +316,93 @@ class Analytics(APIView):
 
         return to_return
 
+    def cdr_ranking(self, request, *args, **kwargs):
+        try:
+            all_data = {}
+            today = datetime.date.today()
 
+            # 1 week
+            start_date = today - datetime.timedelta(days=7)
+            all_data['days_7'] = self.compute_cdr_rankings(start_date)
+
+            # 4 weeks
+            start_date = today - datetime.timedelta(weeks=4)
+            all_data['weeks_4'] = self.compute_cdr_rankings(start_date)
+
+            # 12 weeks
+            start_date = today - datetime.timedelta(weeks=12)
+            all_data['weeks_12'] = self.compute_cdr_rankings(start_date)
+
+            # 6 months ranking
+            start_date = today - datetime.timedelta(days=182)
+            all_data['months_6'] = self.compute_cdr_rankings(start_date)
+
+            return JsonResponse(all_data, status=200, safe=False)
+
+        except Exception as e:
+            capture_exception(e)
+            if settings.DEBUG: print(str(e))
+            return JsonResponse({'message': "Error while fetching the CDR rankings"}, status=500, safe=False)
+
+    def compute_cdr_rankings(self, start_date):
+        # lets get all the syndromic reports submitted by reporters
+        summed_reports=SyndromicIncidences.objects.filter(datetime_reported__gte=start_date).values('reporter').annotate(sum_reports=Count('reporter')).values('reporter', 'sum_reports').order_by('-sum_reports').all()
+
+        i = 1
+        rank_data = []
+        odk_form = OdkForms()
+        for rep in summed_reports:
+            rank_data.append({
+                'name': odk_form.get_value_from_dictionary(rep['reporter']),
+                'records': rep['sum_reports']
+            })
+            i+=1
+            if i>5: break
+
+        return rank_data
+
+    def cdr_analytics(self, request, *args, **kwargs):
+        try:
+            all_data = {}
+            today = datetime.date.today()
+            cdr_count = Recipients.objects.filter(designation='cdr').count()
+            once_active_cdrs = list(SyndromicIncidences.objects.values('reporter').annotate(sum_reports=Count('reporter')).values('reporter').all().values_list('reporter', flat=True))
+
+            # 1 week
+            start_date = today - datetime.timedelta(days=7)
+            all_data['days_7'] = self.compute_cdr_analytics(start_date, cdr_count, once_active_cdrs)
+
+            # 4 weeks
+            start_date = today - datetime.timedelta(weeks=4)
+            all_data['weeks_4'] = self.compute_cdr_analytics(start_date, cdr_count, once_active_cdrs)
+
+            # 12 weeks
+            start_date = today - datetime.timedelta(weeks=12)
+            all_data['weeks_12'] = self.compute_cdr_analytics(start_date, cdr_count, once_active_cdrs)
+
+            # 6 months ranking
+            start_date = today - datetime.timedelta(days=182)
+            all_data['months_6'] = self.compute_cdr_analytics(start_date, cdr_count, once_active_cdrs)
+
+            return JsonResponse(all_data, status=200, safe=False)
+
+        except Exception as e:
+            capture_exception(e)
+            if settings.DEBUG: print(str(e))
+            return JsonResponse({'message': "Error while fetching the CDR analytics"}, status=500, safe=False)
+
+    def compute_cdr_analytics(self, start_date, cdr_count, once_active_cdrs):
+        cur_period_cdrs = list(SyndromicIncidences.objects.filter(datetime_reported__gte=start_date).values('reporter').annotate(sum_reports=Count('reporter')).values('reporter', 'sum_reports').all().values_list('reporter', flat=True))
+
+        active_cdrs = 0
+        dormant_cdrs = 0
+        for cdr in once_active_cdrs:
+            if cdr in cur_period_cdrs:
+                active_cdrs += 1
+            else:
+                dormant_cdrs += 1
+
+        return {'active': (active_cdrs/cdr_count)*100 , 'dormant': (dormant_cdrs/cdr_count)*100, 'non-responsive': ((cdr_count-(active_cdrs+dormant_cdrs))/cdr_count)*100 }
 
 
 

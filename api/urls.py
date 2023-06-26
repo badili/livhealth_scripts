@@ -18,4 +18,6 @@ urlpatterns = [
     re_path('submissions', Analytics.as_view(), name='submissions'),
     re_path('subcounty_rankings', Analytics.as_view(), name='subcounty_rankings'),
     re_path('enumerator_ranking', Analytics.as_view(), name='enumerator_ranking'),
+    re_path('cdr_ranking', Analytics.as_view(), name='cdr_ranking'),
+    re_path('cdr_analytics', Analytics.as_view(), name='cdr_analytics'),
 ]
