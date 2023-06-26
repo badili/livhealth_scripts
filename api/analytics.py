@@ -25,7 +25,7 @@ class Analytics(APIView):
                 return self.submissions(request, *args, **kwargs)
             elif re.search('subcounty_rankings$', request.path):
                 return self.subcounty_rankings(request, *args, **kwargs)
-            elif re.search('enumerator_ranking$', request.path):
+            elif re.search('scvo_rankings$', request.path):
                 return self.enumerator_ranking(request, *args, **kwargs)
             elif re.search('cdr_ranking$', request.path):
                 return self.cdr_ranking(request, *args, **kwargs)
@@ -279,12 +279,12 @@ class Analytics(APIView):
         all_data = {}
 
         # syndromic
-        syndromes_count = SyndromicIncidences.objects.filter(datetime_reported__gte=start_date).values('reporter').annotate(no_recs=Count('reporter')).values('no_recs', 'reporter').all()
+        syndromes_count = SyndromicIncidences.objects.filter(datetime_reported__gte=start_date).values('scvo_reporter').annotate(no_recs=Count('scvo_reporter')).values('no_recs', 'scvo_reporter').all()
         for syn in syndromes_count:
-            if syn['reporter'] not in all_data:
-                all_data[syn['reporter']] = {}
+            if syn['scvo_reporter'] not in all_data:
+                all_data[syn['scvo_reporter']] = {}
 
-            all_data[syn['reporter']]['syndromic'] = syn['no_recs']
+            all_data[syn['scvo_reporter']]['syndromic'] = syn['no_recs']
 
         # nd1
         nd1_reports_count = NDReport.objects.filter(datetime_reported__gte=start_date, reporter__isnull=False).values('reporter').annotate(no_recs=Count('reporter')).values('no_recs', 'reporter').all()
