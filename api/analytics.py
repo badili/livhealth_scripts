@@ -58,6 +58,7 @@ class Analytics(APIView):
                 for next_level, data1_ in data_.items():
                     all_data[top_level].append({
                         'x': i,
+                        'x_name': next_level,
                         'y': [data1_, nd1s[top_level][next_level], shs[top_level][next_level], ]
                     })
                     i += 1
@@ -78,13 +79,13 @@ class Analytics(APIView):
         today = datetime.date.today()
 
         # 1 week
-        start_date = today - datetime.timedelta(days=7)
+        start_date = today - datetime.timedelta(days=6)
         all_subms = cur_object.objects.filter(datetime_reported__gte=start_date, datetime_reported__lte=today).values('datetime_reported').all()
         subms_pd = pd.DataFrame(all_subms)
         if subms_pd.empty:
             all_data['days_7'] = {}
         else:
-            subms_pd['periods'] = subms_pd['datetime_reported'].astype(str).str[:10]
+            subms_pd['periods'] = subms_pd['datetime_reported'].astype(str).str[5:10]
             all_data['days_7'] = subms_pd.groupby('periods').count().datetime_reported.to_dict()
 
         # fill the blanks
@@ -93,16 +94,16 @@ class Analytics(APIView):
             if date_ not in all_data['days_7']: all_data['days_7'][date_] = 0
 
         # 4 weeks
-        start_date = today - datetime.timedelta(weeks=4)
+        start_date = today - datetime.timedelta(weeks=3)
         all_subms = cur_object.objects.filter(datetime_reported__gte=start_date, datetime_reported__lte=today).values('datetime_reported').all()
         subms_pd = pd.DataFrame(all_subms)
         if subms_pd.empty:
             all_data['weeks_4'] = {}
         else:
             try:
-                subms_pd['periods'] = subms_pd['datetime_reported'].dt.isocalendar().week
+                subms_pd['periods'] = subms_pd['datetime_reported'].dt.strftime('Wk %U')
             except AttributeError:
-                subms_pd['periods'] = subms_pd['datetime_reported'].dt.isocalendar()[1]
+                subms_pd['periods'] = subms_pd['datetime_reported'].dt.strftime('Wk %U')[1]
 
             all_data['weeks_4'] = subms_pd.groupby('periods').count().datetime_reported.to_dict()
             all_data['weeks_4'] = {str(k):v for k,v in all_data['weeks_4'].items()}
@@ -110,23 +111,23 @@ class Analytics(APIView):
         # fill the blanks
         for i in range((today-start_date).days + 1):
             try:
-                week_ = (start_date + datetime.timedelta(days=i)).isocalendar().week
+                week_ = (start_date + datetime.timedelta(days=i)).strftime('Wk %U')
             except AttributeError:
-                week_ = (start_date + datetime.timedelta(days=i)).isocalendar()[1]
+                week_ = (start_date + datetime.timedelta(days=i)).strftime('Wk %U')[1]
                 
             if week_ not in all_data['weeks_4']: all_data['weeks_4'][str(week_)] = 0
 
         # 12 weeks
-        start_date = today - datetime.timedelta(weeks=12)
+        start_date = today - datetime.timedelta(weeks=11)
         all_subms = cur_object.objects.filter(datetime_reported__gte=start_date, datetime_reported__lte=today).values('datetime_reported').all()
         subms_pd = pd.DataFrame(all_subms)
         if subms_pd.empty:
             all_data['weeks_12'] = {}
         else:
             try:
-                subms_pd['periods'] = subms_pd['datetime_reported'].dt.isocalendar().week
+                subms_pd['periods'] = subms_pd['datetime_reported'].dt.strftime('Wk %U')
             except AttributeError:
-                subms_pd['periods'] = subms_pd['datetime_reported'].dt.isocalendar()[1]
+                subms_pd['periods'] = subms_pd['datetime_reported'].dt.strftime('Wk %U')[1]
                 
             all_data['weeks_12'] = subms_pd.groupby('periods').count().datetime_reported.to_dict()
             all_data['weeks_12'] = {str(k):v for k,v in all_data['weeks_12'].items()}
@@ -134,9 +135,9 @@ class Analytics(APIView):
         # fill the blanks
         for i in range((today-start_date).days + 1):
             try:
-                weekn_ = (start_date + datetime.timedelta(days=i)).isocalendar().week
+                weekn_ = (start_date + datetime.timedelta(days=i)).strftime('Wk %U')
             except AttributeError:
-                weekn_ = (start_date + datetime.timedelta(days=i)).isocalendar()[1]
+                weekn_ = (start_date + datetime.timedelta(days=i)).strftime('Wk %U')[1]
             
             if weekn_ not in all_data['weeks_12']: all_data['weeks_12'][str(weekn_)] = 0
 
@@ -163,19 +164,19 @@ class Analytics(APIView):
             today = datetime.date.today()
 
             # 1 week
-            start_date = today - datetime.timedelta(days=7)
+            start_date = today - datetime.timedelta(days=6)
             all_data['days_7'] = self.compute_ranking(start_date)
 
             # 4 weeks
-            start_date = today - datetime.timedelta(weeks=4)
+            start_date = today - datetime.timedelta(weeks=3)
             all_data['weeks_4'] = self.compute_ranking(start_date)
 
             # 12 weeks
-            start_date = today - datetime.timedelta(weeks=12)
+            start_date = today - datetime.timedelta(weeks=11)
             all_data['weeks_12'] = self.compute_ranking(start_date)
 
             # 6 months ranking
-            start_date = today - datetime.timedelta(days=182)
+            start_date = today - datetime.timedelta(days=181)
             all_data['months_6'] = self.compute_ranking(start_date)
 
             return JsonResponse(all_data, status=200, safe=False)
@@ -249,19 +250,19 @@ class Analytics(APIView):
             today = datetime.date.today()
 
             # 1 week
-            start_date = today - datetime.timedelta(days=7)
+            start_date = today - datetime.timedelta(days=6)
             all_data['days_7'] = self.compute_enum_ranking(start_date)
 
             # 4 weeks
-            start_date = today - datetime.timedelta(weeks=4)
+            start_date = today - datetime.timedelta(weeks=3)
             all_data['weeks_4'] = self.compute_enum_ranking(start_date)
 
             # 12 weeks
-            start_date = today - datetime.timedelta(weeks=12)
+            start_date = today - datetime.timedelta(weeks=11)
             all_data['weeks_12'] = self.compute_enum_ranking(start_date)
 
             # 6 months ranking
-            start_date = today - datetime.timedelta(days=182)
+            start_date = today - datetime.timedelta(days=181)
             all_data['months_6'] = self.compute_enum_ranking(start_date)
 
             return JsonResponse(all_data, status=200, safe=False)
@@ -312,7 +313,7 @@ class Analytics(APIView):
             })
             i+=1
 
-            if i==6: break
+            if i==11: break
 
         return to_return
 
@@ -322,19 +323,19 @@ class Analytics(APIView):
             today = datetime.date.today()
 
             # 1 week
-            start_date = today - datetime.timedelta(days=7)
+            start_date = today - datetime.timedelta(days=6)
             all_data['days_7'] = self.compute_cdr_rankings(start_date)
 
             # 4 weeks
-            start_date = today - datetime.timedelta(weeks=4)
+            start_date = today - datetime.timedelta(weeks=3)
             all_data['weeks_4'] = self.compute_cdr_rankings(start_date)
 
             # 12 weeks
-            start_date = today - datetime.timedelta(weeks=12)
+            start_date = today - datetime.timedelta(weeks=11)
             all_data['weeks_12'] = self.compute_cdr_rankings(start_date)
 
             # 6 months ranking
-            start_date = today - datetime.timedelta(days=182)
+            start_date = today - datetime.timedelta(days=181)
             all_data['months_6'] = self.compute_cdr_rankings(start_date)
 
             return JsonResponse(all_data, status=200, safe=False)
@@ -352,10 +353,13 @@ class Analytics(APIView):
         rank_data = []
         odk_form = OdkForms()
         for rep in summed_reports:
+            reporter_tel = Recipients.objects.get(username=rep['reporter'])
             rank_data.append({
                 'name': odk_form.get_value_from_dictionary(rep['reporter']),
-                'records': rep['sum_reports']
+                'records': rep['sum_reports'],
+                'tel': reporter_tel.cell_no if reporter_tel.cell_no else reporter_tel.alternative_cell_no
             })
+
             i+=1
             if i>5: break
 
@@ -369,19 +373,19 @@ class Analytics(APIView):
             once_active_cdrs = list(SyndromicIncidences.objects.values('reporter').annotate(sum_reports=Count('reporter')).values('reporter').all().values_list('reporter', flat=True))
 
             # 1 week
-            start_date = today - datetime.timedelta(days=7)
+            start_date = today - datetime.timedelta(days=6)
             all_data['days_7'] = self.compute_cdr_analytics(start_date, cdr_count, once_active_cdrs)
 
             # 4 weeks
-            start_date = today - datetime.timedelta(weeks=4)
+            start_date = today - datetime.timedelta(weeks=3)
             all_data['weeks_4'] = self.compute_cdr_analytics(start_date, cdr_count, once_active_cdrs)
 
             # 12 weeks
-            start_date = today - datetime.timedelta(weeks=12)
+            start_date = today - datetime.timedelta(weeks=11)
             all_data['weeks_12'] = self.compute_cdr_analytics(start_date, cdr_count, once_active_cdrs)
 
             # 6 months ranking
-            start_date = today - datetime.timedelta(days=182)
+            start_date = today - datetime.timedelta(days=181)
             all_data['months_6'] = self.compute_cdr_analytics(start_date, cdr_count, once_active_cdrs)
 
             return JsonResponse(all_data, status=200, safe=False)
@@ -402,7 +406,12 @@ class Analytics(APIView):
             else:
                 dormant_cdrs += 1
 
-        return {'active': (active_cdrs/cdr_count)*100 , 'dormant': (dormant_cdrs/cdr_count)*100, 'non-responsive': ((cdr_count-(active_cdrs+dormant_cdrs))/cdr_count)*100 }
+        return {
+            'active': (active_cdrs/cdr_count)*100 ,
+            'dormant': (dormant_cdrs/cdr_count)*100,
+            'non-responsive': ((cdr_count-(active_cdrs+dormant_cdrs))/cdr_count)*100,
+            'total_cdrs': cdr_count
+        }
 
 
 
