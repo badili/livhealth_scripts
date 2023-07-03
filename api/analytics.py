@@ -4,7 +4,7 @@ import datetime
 import numpy as np
 import pandas as pd
 
-from django.db.models import Q, Sum, Count, IntegerField, Min, Max, Avg, F
+from django.db.models import Q, Sum, Count, IntegerField, Min, Max, Avg, F, Value
 from django.db.models.functions import Substr
 from django.db.models.expressions import RawSQL
 from django.conf import settings
@@ -79,84 +79,50 @@ class Analytics(APIView):
         today = datetime.date.today()
 
         # 1 week
-        start_date = today - datetime.timedelta(days=6)
-        all_subms = cur_object.objects.filter(datetime_reported__gte=start_date, datetime_reported__lte=today).values('datetime_reported').all()
-        subms_pd = pd.DataFrame(all_subms)
-        if subms_pd.empty:
-            all_data['days_7'] = {}
-        else:
-            subms_pd['periods'] = subms_pd['datetime_reported'].astype(str).str[5:10]
-            all_data['days_7'] = subms_pd.groupby('periods').count().datetime_reported.to_dict()
-
-        # fill the blanks
-        for i in range((today-start_date).days + 1):
-            date_ = (start_date + datetime.timedelta(days=i)).strftime('%Y-%m-%d')
-            if date_ not in all_data['days_7']: all_data['days_7'][date_] = 0
+        start_date = today - datetime.timedelta(days=7)
+        all_data['days_7'] = self.analyze_period_data(start_date, cur_object, '%m-%d')
 
         # 4 weeks
-        start_date = today - datetime.timedelta(weeks=3)
-        all_subms = cur_object.objects.filter(datetime_reported__gte=start_date, datetime_reported__lte=today).values('datetime_reported').all()
-        subms_pd = pd.DataFrame(all_subms)
-        if subms_pd.empty:
-            all_data['weeks_4'] = {}
-        else:
-            try:
-                subms_pd['periods'] = subms_pd['datetime_reported'].dt.strftime('Wk %U')
-            except AttributeError:
-                subms_pd['periods'] = subms_pd['datetime_reported'].dt.strftime('Wk %U')[1]
-
-            all_data['weeks_4'] = subms_pd.groupby('periods').count().datetime_reported.to_dict()
-            all_data['weeks_4'] = {str(k):v for k,v in all_data['weeks_4'].items()}
-
-        # fill the blanks
-        for i in range((today-start_date).days + 1):
-            try:
-                week_ = (start_date + datetime.timedelta(days=i)).strftime('Wk %U')
-            except AttributeError:
-                week_ = (start_date + datetime.timedelta(days=i)).strftime('Wk %U')[1]
-                
-            if week_ not in all_data['weeks_4']: all_data['weeks_4'][str(week_)] = 0
+        start_date = today - datetime.timedelta(weeks=4)
+        all_data['weeks_4'] = self.analyze_period_data(start_date, cur_object, 'Wk %U')
 
         # 12 weeks
-        start_date = today - datetime.timedelta(weeks=11)
-        all_subms = cur_object.objects.filter(datetime_reported__gte=start_date, datetime_reported__lte=today).values('datetime_reported').all()
-        subms_pd = pd.DataFrame(all_subms)
-        if subms_pd.empty:
-            all_data['weeks_12'] = {}
-        else:
-            try:
-                subms_pd['periods'] = subms_pd['datetime_reported'].dt.strftime('Wk %U')
-            except AttributeError:
-                subms_pd['periods'] = subms_pd['datetime_reported'].dt.strftime('Wk %U')[1]
-                
-            all_data['weeks_12'] = subms_pd.groupby('periods').count().datetime_reported.to_dict()
-            all_data['weeks_12'] = {str(k):v for k,v in all_data['weeks_12'].items()}
-
-        # fill the blanks
-        for i in range((today-start_date).days + 1):
-            try:
-                weekn_ = (start_date + datetime.timedelta(days=i)).strftime('Wk %U')
-            except AttributeError:
-                weekn_ = (start_date + datetime.timedelta(days=i)).strftime('Wk %U')[1]
-            
-            if weekn_ not in all_data['weeks_12']: all_data['weeks_12'][str(weekn_)] = 0
+        start_date = today - datetime.timedelta(weeks=12)
+        all_data['weeks_12'] = self.analyze_period_data(start_date, cur_object, 'Wk %U')
 
         # 6 months
         start_date = today - datetime.timedelta(days=182)
-        all_subms = cur_object.objects.filter(datetime_reported__gte=start_date, datetime_reported__lte=today).values('datetime_reported').all()
-        subms_pd = pd.DataFrame(all_subms)
-        if subms_pd.empty:
-            all_data['months_6'] = {}
-        else:
-            subms_pd['periods'] = subms_pd['datetime_reported'].astype(str).str[:7]
-            all_data['months_6'] = subms_pd.groupby('periods').count().datetime_reported.to_dict()
-
-        # fill the blanks
-        for i in range((today-start_date).days):
-            month_ = (start_date + datetime.timedelta(days=i)).strftime('%Y-%m')
-            if month_ not in all_data['months_6']: all_data['months_6'][month_] = 0
+        all_data['months_6'] = self.analyze_period_data(start_date, cur_object, '%b\'%y')
 
         return all_data
+
+    def analyze_period_data(self, start_date, cur_object, format_):
+        today = datetime.date.today()
+        all_subms = cur_object.objects.filter(datetime_reported__gte=start_date, datetime_reported__lte=today).annotate(v_count=Value(1, output_field=IntegerField())).order_by('datetime_reported').values('datetime_reported', 'v_count').all()
+        subms_pd = pd.DataFrame(all_subms)
+        if subms_pd.empty:
+            subms_pd = pd.DataFrame(columns=['datetime_reported', 'v_count', 'periods'])
+
+        else:
+            subms_pd['periods'] = subms_pd['datetime_reported'].dt.strftime(format_)
+
+        # fill the blanks
+        for i in range((today-start_date).days + 1):
+            try:
+                month_ = (start_date + datetime.timedelta(days=i)).strftime(format_)
+            except AttributeError:
+                month_ = (start_date + datetime.timedelta(days=i)).strftime(format_)[1]
+            
+            if not month_ in subms_pd['periods'].values:
+                v_date = (start_date + datetime.timedelta(days=i))
+                subms_pd.loc[len(subms_pd.index)] = (datetime.datetime.combine(v_date, datetime.datetime.min.time()), 0, (start_date + datetime.timedelta(days=i)).strftime(format_) )
+
+        subms_pd.sort_values('datetime_reported', inplace=True)
+        cur_data = subms_pd.groupby('periods', sort=False).sum('v_count').v_count.to_dict()
+        cur_data = {str(k):v for k,v in cur_data.items()}
+
+        return cur_data
+
 
     def subcounty_rankings(self, request, *args, **kwargs):
         try:
